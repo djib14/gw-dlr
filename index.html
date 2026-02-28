@@ -95,6 +95,13 @@
 
     .due { color: #ff6b6b; }
 
+    .urgent {
+      border-left-color: #ff6b6b !important;
+      background: #2a1010;
+    }
+
+    .urgent .minutes { color: #ff6b6b; }
+
     #status {
       font-size: 0.78rem;
       color: #555;
@@ -111,7 +118,7 @@
   <div id="clock">--:--</div>
 
   <div class="section">
-    <div class="section-title">DLR</div>
+    <div class="section-title">DLR → Bank</div>
     <div id="dlr-trains"><p class="empty-msg">Loading...</p></div>
   </div>
 
@@ -147,7 +154,11 @@
       document.getElementById("clock").textContent = `${h}:${m}`;
     }
 
-    function minsDisplay(mins, cardClass) {
+    function urgentClass(mins) {
+      return mins <= 2 ? "urgent" : "";
+    }
+
+    function minsDisplay(mins) {
       if (mins <= 1) return `<div class="minutes due">Due<span>mins</span></div>`;
       return `<div class="minutes">${mins}<span>mins</span></div>`;
     }
@@ -160,19 +171,19 @@
         const data = await res.json();
 
         const trains = data
-          .filter(t => t.modeName === "dlr")
+          .filter(t => t.modeName === "dlr" && !(t.destinationName || "").includes("Lewisham"))
           .sort((a, b) => a.timeToStation - b.timeToStation)
           .slice(0, 4);
 
         if (trains.length === 0) {
-          div.innerHTML = `<p class="empty-msg">No DLR trains right now.</p>`;
+          div.innerHTML = `<p class="empty-msg">No DLR trains towards Bank right now.</p>`;
           return;
         }
 
         div.innerHTML = trains.map(t => {
           const mins = Math.round(t.timeToStation / 60);
           return `
-            <div class="train-card dlr-card">
+            <div class="train-card dlr-card ${urgentClass(mins)}">
               <div class="card-left">
                 <div class="destination">${t.destinationName || "Unknown"}</div>
                 <div class="operator">DLR</div>
@@ -211,7 +222,7 @@
               ? `<span class="late">Late</span>`
               : `<span class="no-report">${t.status || ""}</span>`;
           return `
-            <div class="train-card rail-card">
+            <div class="train-card rail-card ${urgentClass(mins)}">
               <div class="card-left">
                 <div class="destination">${t.destination_name || "Unknown"}</div>
                 <div class="operator">${t.operator_name || ""} · ${status}</div>
