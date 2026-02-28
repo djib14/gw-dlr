@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Greenwich DLR</title>
+  <title>Greenwich Station</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -15,13 +15,13 @@
       display: flex;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
       padding: 20px;
     }
 
     h1 {
       font-size: 1.4rem;
       color: #aaa;
+      margin-top: 20px;
       margin-bottom: 4px;
       letter-spacing: 1px;
       text-transform: uppercase;
@@ -31,71 +31,114 @@
       font-size: 3rem;
       font-weight: bold;
       color: #fff;
+      margin-bottom: 28px;
+    }
+
+    .section {
+      width: 100%;
+      max-width: 480px;
       margin-bottom: 24px;
     }
 
-    #trains {
-      width: 100%;
-      max-width: 480px;
+    .section-title {
+      font-size: 0.75rem;
+      font-weight: bold;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: #888;
+      margin-bottom: 10px;
+      padding-left: 4px;
     }
 
     .train-card {
       background: #16213e;
-      border-left: 5px solid #00a0e3;
       border-radius: 8px;
-      padding: 16px 20px;
-      margin-bottom: 12px;
+      padding: 14px 18px;
+      margin-bottom: 10px;
       display: flex;
       justify-content: space-between;
       align-items: center;
     }
 
+    .dlr-card   { border-left: 5px solid #00a0e3; }
+    .rail-card  { border-left: 5px solid #e8642c; }
+
+    .card-left { display: flex; flex-direction: column; gap: 4px; }
+
     .destination {
-      font-size: 1.1rem;
+      font-size: 1.05rem;
       font-weight: bold;
     }
+
+    .operator {
+      font-size: 0.78rem;
+      color: #888;
+    }
+
+    .on-time  { color: #4caf50; }
+    .late     { color: #ff6b6b; }
+    .no-report { color: #888; }
 
     .minutes {
       font-size: 2rem;
       font-weight: bold;
       color: #00e5ff;
       text-align: right;
+      min-width: 60px;
     }
 
     .minutes span {
-      font-size: 0.9rem;
+      font-size: 0.8rem;
       color: #aaa;
       display: block;
     }
 
-    .due {
-      color: #ff6b6b;
-    }
+    .due { color: #ff6b6b; }
 
     #status {
-      margin-top: 20px;
-      font-size: 0.8rem;
-      color: #666;
+      font-size: 0.78rem;
+      color: #555;
+      margin-bottom: 30px;
     }
 
-    #error {
-      color: #ff6b6b;
-      text-align: center;
-      max-width: 400px;
-    }
+    .empty-msg { color: #555; font-size: 0.9rem; padding-left: 4px; }
+    .error-msg { color: #ff6b6b; font-size: 0.9rem; padding-left: 4px; }
   </style>
 </head>
 <body>
 
-  <h1>Greenwich DLR</h1>
+  <h1>Greenwich Station</h1>
   <div id="clock">--:--</div>
-  <div id="trains"><p style="color:#666">Loading...</p></div>
+
+  <div class="section">
+    <div class="section-title">DLR</div>
+    <div id="dlr-trains"><p class="empty-msg">Loading...</p></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">National Rail → London</div>
+    <div id="rail-trains"><p class="empty-msg">Loading...</p></div>
+  </div>
+
   <div id="status"></div>
 
   <script>
-    // TfL stop ID for Greenwich DLR station
-    const STOP_ID = "940GZZDLGRE";
-    const TFL_URL = `https://api.tfl.gov.uk/StopPoint/${STOP_ID}/Arrivals`;
+    // --- DLR via TfL API ---
+    const DLR_URL = "https://api.tfl.gov.uk/StopPoint/940GZZDLGRE/Arrivals";
+
+    // --- National Rail via TransportAPI ---
+    const RAIL_URL = "https://transportapi.com/v3/uk/train/station_timetables/GNW.json" +
+      "?app_id=04668624&app_key=fcf40276b02a30519083fda8e6fe6772&live=true&train_status=passenger&type=departure";
+
+    // Destinations that are towards/through London (northbound Thameslink)
+    const LONDON_BOUND = ["luton", "bedford", "st albans", "harpenden", "welwyn", "stevenage", "farringdon"];
+
+    function isTowardsLondon(train) {
+      const dest = (train.destination_name || "").toLowerCase();
+      if (dest.includes("london")) return true;
+      if (LONDON_BOUND.some(d => dest.includes(d))) return true;
+      return false;
+    }
 
     function updateClock() {
       const now = new Date();
@@ -104,52 +147,96 @@
       document.getElementById("clock").textContent = `${h}:${m}`;
     }
 
-    async function fetchTrains() {
-      const trainsDiv = document.getElementById("trains");
-      const statusDiv = document.getElementById("status");
+    function minsDisplay(mins, cardClass) {
+      if (mins <= 1) return `<div class="minutes due">Due<span>mins</span></div>`;
+      return `<div class="minutes">${mins}<span>mins</span></div>`;
+    }
 
+    async function fetchDLR() {
+      const div = document.getElementById("dlr-trains");
       try {
-        const res = await fetch(TFL_URL);
+        const res = await fetch(DLR_URL);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
 
-        // Filter DLR only, sort by arrival time
-        const dlr = data
+        const trains = data
           .filter(t => t.modeName === "dlr")
           .sort((a, b) => a.timeToStation - b.timeToStation)
-          .slice(0, 5);
+          .slice(0, 4);
 
-        if (dlr.length === 0) {
-          trainsDiv.innerHTML = `<p style="color:#aaa;text-align:center">No trains found right now.</p>`;
-        } else {
-          trainsDiv.innerHTML = dlr.map(t => {
-            const mins = Math.round(t.timeToStation / 60);
-            const minsText = mins <= 1
-              ? `<div class="minutes due">Due<span>mins</span></div>`
-              : `<div class="minutes">${mins}<span>mins</span></div>`;
-            return `
-              <div class="train-card">
-                <div class="destination">${t.destinationName || "Unknown"}</div>
-                ${minsText}
-              </div>`;
-          }).join("");
+        if (trains.length === 0) {
+          div.innerHTML = `<p class="empty-msg">No DLR trains right now.</p>`;
+          return;
         }
 
-        const now = new Date();
-        statusDiv.textContent = `Updated at ${now.toLocaleTimeString()}`;
+        div.innerHTML = trains.map(t => {
+          const mins = Math.round(t.timeToStation / 60);
+          return `
+            <div class="train-card dlr-card">
+              <div class="card-left">
+                <div class="destination">${t.destinationName || "Unknown"}</div>
+                <div class="operator">DLR</div>
+              </div>
+              ${minsDisplay(mins)}
+            </div>`;
+        }).join("");
 
       } catch (err) {
-        trainsDiv.innerHTML = `<p id="error">Could not load train times.<br>Check your internet connection.<br><small>${err.message}</small></p>`;
-        statusDiv.textContent = "";
+        div.innerHTML = `<p class="error-msg">DLR data unavailable (${err.message})</p>`;
       }
+    }
+
+    async function fetchRail() {
+      const div = document.getElementById("rail-trains");
+      try {
+        const res = await fetch(RAIL_URL);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+
+        const trains = (data.departures?.all || [])
+          .filter(t => isTowardsLondon(t) && t.best_departure_estimate_mins != null)
+          .sort((a, b) => a.best_departure_estimate_mins - b.best_departure_estimate_mins)
+          .slice(0, 4);
+
+        if (trains.length === 0) {
+          div.innerHTML = `<p class="empty-msg">No London-bound trains right now.</p>`;
+          return;
+        }
+
+        div.innerHTML = trains.map(t => {
+          const mins = t.best_departure_estimate_mins;
+          const status = t.status === "ON TIME"
+            ? `<span class="on-time">On time</span>`
+            : t.status === "LATE"
+              ? `<span class="late">Late</span>`
+              : `<span class="no-report">${t.status || ""}</span>`;
+          return `
+            <div class="train-card rail-card">
+              <div class="card-left">
+                <div class="destination">${t.destination_name || "Unknown"}</div>
+                <div class="operator">${t.operator_name || ""} · ${status}</div>
+              </div>
+              ${minsDisplay(mins)}
+            </div>`;
+        }).join("");
+
+      } catch (err) {
+        div.innerHTML = `<p class="error-msg">Rail data unavailable (${err.message})</p>`;
+      }
+    }
+
+    async function fetchAll() {
+      await Promise.all([fetchDLR(), fetchRail()]);
+      const now = new Date();
+      document.getElementById("status").textContent = `Updated at ${now.toLocaleTimeString()}`;
     }
 
     // Init
     updateClock();
     setInterval(updateClock, 1000);
 
-    fetchTrains();
-    setInterval(fetchTrains, 30000); // refresh every 30 seconds
+    fetchAll();
+    setInterval(fetchAll, 30000);
   </script>
 
 </body>
