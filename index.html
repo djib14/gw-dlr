@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Greenwich DLR</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    h1 {
+      font-size: 1.4rem;
+      color: #aaa;
+      margin-bottom: 4px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+
+    #clock {
+      font-size: 3rem;
+      font-weight: bold;
+      color: #fff;
+      margin-bottom: 24px;
+    }
+
+    #trains {
+      width: 100%;
+      max-width: 480px;
+    }
+
+    .train-card {
+      background: #16213e;
+      border-left: 5px solid #00a0e3;
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin-bottom: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .destination {
+      font-size: 1.1rem;
+      font-weight: bold;
+    }
+
+    .minutes {
+      font-size: 2rem;
+      font-weight: bold;
+      color: #00e5ff;
+      text-align: right;
+    }
+
+    .minutes span {
+      font-size: 0.9rem;
+      color: #aaa;
+      display: block;
+    }
+
+    .due {
+      color: #ff6b6b;
+    }
+
+    #status {
+      margin-top: 20px;
+      font-size: 0.8rem;
+      color: #666;
+    }
+
+    #error {
+      color: #ff6b6b;
+      text-align: center;
+      max-width: 400px;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Greenwich DLR</h1>
+  <div id="clock">--:--</div>
+  <div id="trains"><p style="color:#666">Loading...</p></div>
+  <div id="status"></div>
+
+  <script>
+    // TfL stop ID for Greenwich DLR station
+    const STOP_ID = "940GZZLUGWCH";
+    const TFL_URL = `https://api.tfl.gov.uk/StopPoint/${STOP_ID}/Arrivals`;
+
+    function updateClock() {
+      const now = new Date();
+      const h = String(now.getHours()).padStart(2, "0");
+      const m = String(now.getMinutes()).padStart(2, "0");
+      document.getElementById("clock").textContent = `${h}:${m}`;
+    }
+
+    async function fetchTrains() {
+      const trainsDiv = document.getElementById("trains");
+      const statusDiv = document.getElementById("status");
+
+      try {
+        const res = await fetch(TFL_URL);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+
+        // Filter DLR only, sort by arrival time
+        const dlr = data
+          .filter(t => t.modeName === "dlr")
+          .sort((a, b) => a.timeToStation - b.timeToStation)
+          .slice(0, 5);
+
+        if (dlr.length === 0) {
+          trainsDiv.innerHTML = `<p style="color:#aaa;text-align:center">No trains found right now.</p>`;
+        } else {
+          trainsDiv.innerHTML = dlr.map(t => {
+            const mins = Math.round(t.timeToStation / 60);
+            const minsText = mins <= 1
+              ? `<div class="minutes due">Due<span>mins</span></div>`
+              : `<div class="minutes">${mins}<span>mins</span></div>`;
+            return `
+              <div class="train-card">
+                <div class="destination">${t.destinationName || "Unknown"}</div>
+                ${minsText}
+              </div>`;
+          }).join("");
+        }
+
+        const now = new Date();
+        statusDiv.textContent = `Updated at ${now.toLocaleTimeString()}`;
+
+      } catch (err) {
+        trainsDiv.innerHTML = `<p id="error">Could not load train times.<br>Check your internet connection.<br><small>${err.message}</small></p>`;
+        statusDiv.textContent = "";
+      }
+    }
+
+    // Init
+    updateClock();
+    setInterval(updateClock, 1000);
+
+    fetchTrains();
+    setInterval(fetchTrains, 30000); // refresh every 30 seconds
+  </script>
+
+</body>
+</html>
