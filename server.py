@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Local API server: serves timetable from Pronote + transport data + the dashboard HTML."""
 import os
+import json
 import time
 import threading
 from datetime import date, datetime, timedelta
@@ -19,6 +20,10 @@ PRONOTE_URL  = os.environ["PRONOTE_URL"]
 PRONOTE_USER = os.environ["PRONOTE_USER"]
 PRONOTE_PASS = os.environ["PRONOTE_PASS"]
 
+ABEL_EMAIL        = os.environ.get("ABEL_EMAIL", "")
+ABEL_PASS         = os.environ.get("ABEL_PASS", "")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+
 DLR_URL  = "https://api.tfl.gov.uk/StopPoint/940GZZDLGRE/Arrivals"
 RAIL_URL = (
     "https://transportapi.com/v3/uk/train/station_timetables/GNW.json"
@@ -29,6 +34,7 @@ LONDON_BOUND = ["luton", "bedford", "st albans", "harpenden", "welwyn", "stevena
 
 _cache           = {"data": None, "updated_at": None, "error": None}
 _transport_cache = {"data": None, "updated_at": None, "error": None}
+_dinners_cache   = {"data": None, "updated_at": None, "error": None, "week": None}
 _lock            = threading.Lock()
 
 STATIC_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -233,6 +239,156 @@ def pronote_refresh_loop():
             time.sleep(secs)
 
 
+# ── DINNERS ────────────────────────────────────────────────────────────────────
+
+def scrape_abel_cole() -> list:
+    """Login to Abel & Cole and extract the next delivery's product list."""
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            )
+        )
+        page = context.new_page()
+
+        print(f"[{datetime.now():%H:%M:%S}] Abel&Cole: going to login page…", flush=True)
+        page.goto("https://www.abelandcole.co.uk/login", wait_until="networkidle", timeout=30000)
+
+        page.fill('input[name="email"], input[type="email"]', ABEL_EMAIL)
+        page.fill('input[name="password"], input[type="password"]', ABEL_PASS)
+        page.click('button[type="submit"]')
+        page.wait_for_load_state("networkidle", timeout=30000)
+        print(f"[{datetime.now():%H:%M:%S}] Abel&Cole: logged in, URL={page.url}", flush=True)
+
+        # Navigate to upcoming deliveries
+        page.goto("https://www.abelandcole.co.uk/my-account/deliveries", wait_until="networkidle", timeout=30000)
+        print(f"[{datetime.now():%H:%M:%S}] Abel&Cole: deliveries page URL={page.url}", flush=True)
+
+        # Log a snippet of HTML to help identify correct selectors
+        html = page.content()
+        print(f"[{datetime.now():%H:%M:%S}] Abel&Cole: page HTML ({len(html)} chars) preview:\n{html[:3000]}", flush=True)
+
+        # Try progressively broader selectors until items are found
+        items = []
+        candidate_selectors = [
+            ".delivery-item__name",
+            ".product-name",
+            ".item-name",
+            ".basket-item__name",
+            ".order-item__name",
+            ".product-title",
+            "[data-product-name]",
+            ".delivery-products li",
+            ".order-items li",
+        ]
+        for sel in candidate_selectors:
+            els = page.query_selector_all(sel)
+            if els:
+                items = [el.inner_text().strip() for el in els if el.inner_text().strip()]
+                if items:
+                    print(f"[{datetime.now():%H:%M:%S}] Abel&Cole: {len(items)} items via '{sel}'", flush=True)
+                    break
+
+        browser.close()
+
+    if not items:
+        raise RuntimeError("Abel&Cole scrape returned no items — check selectors in server.py logs")
+    return items
+
+
+def generate_meals(vegetables: list) -> list:
+    """Call Claude Haiku to propose 4 dinners from the vegetable list."""
+    import anthropic
+
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    veg_list = ", ".join(vegetables)
+    prompt = (
+        f"Tu es un chef cuisinier. Voici les légumes et produits disponibles cette semaine "
+        f"dans ma box Abel & Cole :\n{veg_list}\n\n"
+        "Propose 4 dîners variés pour lundi, mardi, mercredi et jeudi. "
+        "Chaque légume/produit ne doit être utilisé que dans UN SEUL dîner maximum.\n\n"
+        "Réponds UNIQUEMENT avec un JSON valide, sans aucun autre texte, dans ce format exact :\n"
+        '[\n'
+        '  {"day": "Lundi",    "name": "Nom du plat", "description": "Description courte en français", "uses": ["Légume1"]},\n'
+        '  {"day": "Mardi",    "name": "Nom du plat", "description": "Description courte en français", "uses": ["Légume2"]},\n'
+        '  {"day": "Mercredi", "name": "Nom du plat", "description": "Description courte en français", "uses": ["Légume3"]},\n'
+        '  {"day": "Jeudi",    "name": "Nom du plat", "description": "Description courte en français", "uses": ["Légume4"]}\n'
+        ']'
+    )
+
+    message = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=1024,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    content = message.content[0].text.strip()
+
+    # Strip markdown code fences if present
+    if "```" in content:
+        parts = content.split("```")
+        content = parts[1] if len(parts) > 1 else parts[0]
+        if content.startswith("json"):
+            content = content[4:].strip()
+
+    return json.loads(content)
+
+
+def fetch_dinners() -> dict:
+    vegetables = scrape_abel_cole()
+    meals = generate_meals(vegetables)
+    return {
+        "week_of":    date.today().strftime("%Y-%m-%d"),
+        "vegetables": vegetables,
+        "meals":      meals,
+    }
+
+
+def _current_monday() -> date:
+    today = date.today()
+    return today - timedelta(days=today.weekday())
+
+
+def dinners_refresh_loop():
+    while True:
+        try:
+            today          = date.today()
+            weekday        = today.weekday()          # 0=Mon … 6=Sun
+            current_monday = str(_current_monday())
+
+            with _lock:
+                cached_week = _dinners_cache["week"]
+
+            # Refresh on: Saturday (5), Sunday (6), or Monday before noon (0 + hour < 12)
+            is_refresh_window = (
+                weekday >= 5
+                or (weekday == 0 and datetime.now().hour < 12)
+            )
+            should_refresh = (cached_week != current_monday) and is_refresh_window
+
+            if should_refresh:
+                print(f"[{datetime.now():%H:%M:%S}] Fetching dinners…", flush=True)
+                data = fetch_dinners()
+                with _lock:
+                    _dinners_cache["data"]       = data
+                    _dinners_cache["updated_at"] = datetime.now().strftime("%H:%M")
+                    _dinners_cache["error"]      = None
+                    _dinners_cache["week"]       = current_monday
+                print(f"[{datetime.now():%H:%M:%S}] Dinners cached OK.", flush=True)
+            else:
+                print(f"[{datetime.now():%H:%M:%S}] Dinners: no refresh needed (week={cached_week}, window={is_refresh_window})", flush=True)
+
+        except Exception as exc:
+            print(f"[{datetime.now():%H:%M:%S}] Dinners ERROR: {exc}", flush=True)
+            with _lock:
+                _dinners_cache["error"] = str(exc)
+
+        time.sleep(3600)  # check every hour
+
+
 # ── ROUTES ─────────────────────────────────────────────────────────────────────
 
 @app.route("/api/trains")
@@ -253,6 +409,15 @@ def api_timetable():
         return jsonify({**_cache["data"], "cached_at": _cache["updated_at"]})
 
 
+@app.route("/api/dinners")
+def api_dinners():
+    with _lock:
+        if _dinners_cache["data"] is None:
+            msg = _dinners_cache["error"] or "En attente du prochain week-end…"
+            return jsonify({"error": msg}), 503
+        return jsonify({**_dinners_cache["data"], "cached_at": _dinners_cache["updated_at"]})
+
+
 @app.route("/")
 def index():
     return send_from_directory(STATIC_DIR, "index.html")
@@ -261,4 +426,5 @@ def index():
 if __name__ == "__main__":
     threading.Thread(target=pronote_refresh_loop, daemon=True).start()
     threading.Thread(target=transport_refresh_loop, daemon=True).start()
+    threading.Thread(target=dinners_refresh_loop, daemon=True).start()
     app.run(host="0.0.0.0", port=5000, debug=False)

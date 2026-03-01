@@ -21,6 +21,7 @@
       --red:         #ef5350;
       --yellow:      #ffa726;
       --cyan:        #00e5ff;
+      --dinners:     #FF8A65;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -104,9 +105,10 @@
 
     .tab-btn:hover { color: var(--text); }
 
-    .tab-btn[data-tab="tab-trains"].active { border-bottom-color: var(--dlr);   color: var(--dlr);   }
-    .tab-btn[data-tab="tab-eliot"].active  { border-bottom-color: var(--eliot); color: var(--eliot); }
-    .tab-btn[data-tab="tab-solal"].active  { border-bottom-color: var(--solal); color: var(--solal); }
+    .tab-btn[data-tab="tab-trains"].active   { border-bottom-color: var(--dlr);     color: var(--dlr);     }
+    .tab-btn[data-tab="tab-eliot"].active    { border-bottom-color: var(--eliot);   color: var(--eliot);   }
+    .tab-btn[data-tab="tab-solal"].active    { border-bottom-color: var(--solal);   color: var(--solal);   }
+    .tab-btn[data-tab="tab-dinners"].active  { border-bottom-color: var(--dinners); color: var(--dinners); }
 
     .tab-content        { display: none; }
     .tab-content.active { display: block; }
@@ -310,6 +312,42 @@
       margin-top: 2px;
     }
 
+    /* ── DINNER CARDS ────────────────────────────── */
+    .meal-card {
+      background: var(--surface2);
+      border-radius: 10px;
+      padding: 12px 14px;
+      margin-bottom: 10px;
+      border-left: 4px solid var(--dinners);
+    }
+
+    .meal-day {
+      font-size: 0.65rem;
+      font-weight: 700;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--dinners);
+      margin-bottom: 4px;
+    }
+
+    .meal-name {
+      font-size: 0.95rem;
+      font-weight: 600;
+      margin-bottom: 3px;
+    }
+
+    .meal-desc { font-size: 0.78rem; color: var(--muted); }
+    .meal-uses { font-size: 0.68rem; color: var(--dim); margin-top: 4px; }
+
+    .veg-item {
+      display: inline-block;
+      background: var(--surface2);
+      border-radius: 6px;
+      padding: 4px 10px;
+      margin: 3px;
+      font-size: 0.8rem;
+    }
+
     /* ── FOOTER ──────────────────────────────────── */
     .footer {
       max-width: 980px;
@@ -356,6 +394,7 @@
     <button class="tab-btn active" data-tab="tab-trains">Trains</button>
     <button class="tab-btn" data-tab="tab-eliot">Eliot</button>
     <button class="tab-btn" data-tab="tab-solal">Solal</button>
+    <button class="tab-btn" data-tab="tab-dinners">Diners</button>
   </nav>
 
   <!-- TAB: TRAINS -->
@@ -424,6 +463,29 @@
           <div class="card-title">Solal · Devoirs</div>
         </div>
         <div id="solal-homework"><p class="msg msg-empty">Loading…</p></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- TAB: DINNERS -->
+  <div id="tab-dinners" class="tab-content">
+    <div class="grid">
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot" style="background:var(--dinners)"></div>
+          <div class="card-title">Menus de la semaine</div>
+        </div>
+        <div id="dinners-meals"><p class="msg msg-empty">Loading…</p></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot" style="background:var(--dinners)"></div>
+          <div class="card-title">Box Abel &amp; Cole</div>
+        </div>
+        <div id="dinners-box"><p class="msg msg-empty">Loading…</p></div>
       </div>
 
     </div>
@@ -608,6 +670,48 @@
       }
     }
 
+    // ── DINNERS ──────────────────────────────────────
+    async function fetchDinners() {
+      const mealsEl = document.getElementById('dinners-meals');
+      const boxEl   = document.getElementById('dinners-box');
+      try {
+        const r = await fetch('/api/dinners');
+        if (!r.ok) {
+          const msg = ((await r.json()).error) || `HTTP ${r.status}`;
+          mealsEl.innerHTML = `<p class="msg msg-empty">${msg}</p>`;
+          boxEl.innerHTML   = '';
+          return;
+        }
+        const data = await r.json();
+
+        // Meals
+        if (!data.meals || !data.meals.length) {
+          mealsEl.innerHTML = `<p class="msg msg-empty">Pas de menus disponibles.</p>`;
+        } else {
+          mealsEl.innerHTML = data.meals.map(m =>
+            `<div class="meal-card">
+              <div class="meal-day">${m.day}</div>
+              <div class="meal-name">${m.name}</div>
+              <div class="meal-desc">${m.description}</div>
+              ${m.uses && m.uses.length ? `<div class="meal-uses">🥦 ${m.uses.join(', ')}</div>` : ''}
+            </div>`
+          ).join('');
+        }
+
+        // Box contents
+        if (!data.vegetables || !data.vegetables.length) {
+          boxEl.innerHTML = `<p class="msg msg-empty">Contenu de la box non disponible.</p>`;
+        } else {
+          boxEl.innerHTML = data.vegetables.map(v =>
+            `<span class="veg-item">${v}</span>`
+          ).join('');
+        }
+      } catch(e) {
+        mealsEl.innerHTML = `<p class="msg msg-error">Unavailable (${e.message})</p>`;
+        boxEl.innerHTML   = '';
+      }
+    }
+
     // ── INIT ─────────────────────────────────────────
     updateClock();
     setInterval(updateClock, 1000);
@@ -618,6 +722,9 @@
     fetchTimetable();
     setInterval(fetchTimetable, 600000);
     setInterval(() => { if (_lastTimetable) renderTimetable(_lastTimetable); }, 60000);
+
+    fetchDinners();
+    setInterval(fetchDinners, 600000);
   </script>
 
 </body>
