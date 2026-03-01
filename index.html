@@ -186,18 +186,25 @@
     }
 
     .train-mins {
-      font-size: 2rem;
+      font-size: 1.35rem;
       font-weight: 700;
       color: var(--cyan);
       text-align: right;
-      line-height: 1;
-      min-width: 52px;
+      line-height: 1.2;
+      min-width: 64px;
+      white-space: nowrap;
     }
 
-    .train-mins small {
-      font-size: 0.62rem;
-      color: var(--muted);
+    .train-mins .train-time {
       display: block;
+      font-size: 1.35rem;
+    }
+
+    .train-mins .train-countdown {
+      display: block;
+      font-size: 0.78rem;
+      color: var(--muted);
+      font-weight: 400;
     }
 
     .due { color: var(--red) !important; }
@@ -524,9 +531,23 @@
     });
 
     // ── TRAINS ───────────────────────────────────────
-    function minsHtml(mins) {
-      if (mins <= 1) return `<div class="train-mins due">Due<small>mins</small></div>`;
-      return `<div class="train-mins">${mins}<small>mins</small></div>`;
+    function minsFromTime(hhmm) {
+      if (!hhmm) return null;
+      const now = new Date();
+      const [h, m] = hhmm.split(':').map(Number);
+      let dep = new Date(now);
+      dep.setHours(h, m, 0, 0);
+      // handle midnight crossover
+      if (dep - now < -60000) dep.setDate(dep.getDate() + 1);
+      return Math.round((dep - now) / 60000);
+    }
+
+    function trainTimeHtml(time) {
+      const mins = minsFromTime(time);
+      const countdown = mins === null ? '' :
+        mins <= 1 ? `<span class="train-countdown">Due</span>` :
+                    `<span class="train-countdown">${mins}m</span>`;
+      return `<div class="train-mins"><span class="train-time">${time || '–'}</span>${countdown}</div>`;
     }
 
     async function fetchTrains() {
@@ -547,13 +568,13 @@
           dlrEl.innerHTML = `<p class="msg msg-empty">No DLR trains right now.</p>`;
         } else {
           dlrEl.innerHTML = data.dlr.map(t => {
-            const mins = t.mins;
-            return `<div class="train-row dlr-row${mins <= 2 ? ' urgent' : ''}">
+            const mins = minsFromTime(t.time);
+            return `<div class="train-row dlr-row${mins !== null && mins <= 2 ? ' urgent' : ''}">
               <div>
                 <div class="train-dest">${t.destination}</div>
                 <div class="train-op">DLR</div>
               </div>
-              ${minsHtml(mins)}
+              ${trainTimeHtml(t.time)}
             </div>`;
           }).join('');
         }
@@ -563,18 +584,18 @@
           railEl.innerHTML = `<p class="msg msg-empty">No London trains right now.</p>`;
         } else {
           railEl.innerHTML = data.rail.map(t => {
-            const mins = t.mins;
+            const mins = minsFromTime(t.time);
             const statusHtml = t.status === 'ON TIME'
               ? `<span class="on-time">On time</span>`
               : t.status === 'LATE'
                 ? `<span class="late">Late</span>`
                 : `<span style="color:var(--muted)">${t.status || ''}</span>`;
-            return `<div class="train-row rail-row${mins <= 2 ? ' urgent' : ''}">
+            return `<div class="train-row rail-row${mins !== null && mins <= 2 ? ' urgent' : ''}">
               <div>
                 <div class="train-dest">${t.destination}</div>
                 <div class="train-op">${t.operator} · ${statusHtml}</div>
               </div>
-              ${minsHtml(mins)}
+              ${trainTimeHtml(t.time)}
             </div>`;
           }).join('');
         }

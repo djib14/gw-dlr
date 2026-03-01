@@ -92,9 +92,10 @@ def fetch_trains():
                     if t.get("modeName") == "dlr" and t.get("direction") == "inbound"]
         arrivals.sort(key=lambda t: t["timeToStation"])
         for t in arrivals[:4]:
+            dep_time = datetime.now() + timedelta(seconds=t["timeToStation"])
             dlr_trains.append({
                 "destination": t.get("destinationName", "Unknown"),
-                "mins":        round(t["timeToStation"] / 60),
+                "time":        dep_time.strftime("%H:%M"),
             })
     except Exception as exc:
         print(f"[{datetime.now():%H:%M:%S}] DLR error: {exc}", flush=True)
@@ -112,7 +113,7 @@ def fetch_trains():
         for t in london_dep[:4]:
             rail_trains.append({
                 "destination": t.get("destination_name", "Unknown"),
-                "mins":        t["best_departure_estimate_mins"],
+                "time":        t.get("aimed_departure_time") or t.get("expected_departure_time", ""),
                 "status":      t.get("status", ""),
                 "operator":    t.get("operator_name", ""),
             })
