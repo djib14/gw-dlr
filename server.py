@@ -23,6 +23,8 @@ PRONOTE_PASS = os.environ["PRONOTE_PASS"]
 ABEL_EMAIL        = os.environ.get("ABEL_EMAIL", "")
 ABEL_PASS         = os.environ.get("ABEL_PASS", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+ABEL_COOKIES_FILE = os.environ.get("ABEL_COOKIES_FILE",
+                                   os.path.join(os.path.dirname(os.path.abspath(__file__)), "abel_cookies.json"))
 
 DLR_URL  = "https://api.tfl.gov.uk/StopPoint/940GZZDLGRE/Arrivals"
 RAIL_URL = (
@@ -242,62 +244,82 @@ def pronote_refresh_loop():
 # ── DINNERS ────────────────────────────────────────────────────────────────────
 
 def scrape_abel_cole() -> list:
-    """Login to Abel & Cole and extract the next delivery's product list."""
-    from playwright.sync_api import sync_playwright
+    """Fetch Abel & Cole next delivery contents using cookies from a real browser session.
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(
-            user_agent=(
-                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            )
+    Abel & Cole is protected by Incapsula WAF which blocks all headless/automated
+    browsers regardless of stealth settings.  The workaround: export cookies from
+    your real browser after logging in, save them to abel_cookies.json (or the path
+    set in ABEL_COOKIES_FILE env var).  Those cookies include the Incapsula
+    'visid_incap_*' proof-of-humanity token that lets requests through.
+
+    How to export cookies (one-time setup, refresh ~yearly):
+      1. Log into https://www.abelandcole.co.uk in Chrome or Firefox.
+      2. Install the "Cookie Editor" browser extension.
+      3. Navigate to https://www.abelandcole.co.uk/my-account/deliveries
+      4. Open Cookie Editor → Export → Export as JSON.
+      5. Save the result to abel_cookies.json next to server.py.
+    """
+    from curl_cffi import requests as cffi_requests
+    from bs4 import BeautifulSoup
+
+    if not os.path.exists(ABEL_COOKIES_FILE):
+        raise RuntimeError(
+            f"Cookie file not found: {ABEL_COOKIES_FILE}\n"
+            "Export your Abel & Cole browser cookies — see scrape_abel_cole() docstring."
         )
-        page = context.new_page()
 
-        print(f"[{datetime.now():%H:%M:%S}] Abel&Cole: going to login page…", flush=True)
-        page.goto("https://www.abelandcole.co.uk/login", wait_until="networkidle", timeout=30000)
+    with open(ABEL_COOKIES_FILE) as f:
+        raw_cookies = json.load(f)
 
-        page.fill('input[name="email"], input[type="email"]', ABEL_EMAIL)
-        page.fill('input[name="password"], input[type="password"]', ABEL_PASS)
-        page.click('button[type="submit"]')
-        page.wait_for_load_state("networkidle", timeout=30000)
-        print(f"[{datetime.now():%H:%M:%S}] Abel&Cole: logged in, URL={page.url}", flush=True)
+    # Cookie Editor exports a list of dicts; convert to name→value dict
+    cookies = {c["name"]: c["value"] for c in raw_cookies if "name" in c and "value" in c}
 
-        # Navigate to upcoming deliveries
-        page.goto("https://www.abelandcole.co.uk/my-account/deliveries", wait_until="networkidle", timeout=30000)
-        print(f"[{datetime.now():%H:%M:%S}] Abel&Cole: deliveries page URL={page.url}", flush=True)
+    print(f"[{datetime.now():%H:%M:%S}] Abel&Cole: fetching with {len(cookies)} cookies…", flush=True)
 
-        # Log a snippet of HTML to help identify correct selectors
-        html = page.content()
-        print(f"[{datetime.now():%H:%M:%S}] Abel&Cole: page HTML ({len(html)} chars) preview:\n{html[:3000]}", flush=True)
+    session = cffi_requests.Session()
+    r = session.get(
+        "https://www.abelandcole.co.uk/my-account/deliveries",
+        cookies=cookies,
+        impersonate="chrome120",
+        headers={"Accept-Language": "en-GB,en;q=0.9"},
+        timeout=30,
+    )
 
-        # Try progressively broader selectors until items are found
-        items = []
-        candidate_selectors = [
-            ".delivery-item__name",
-            ".product-name",
-            ".item-name",
-            ".basket-item__name",
-            ".order-item__name",
-            ".product-title",
-            "[data-product-name]",
-            ".delivery-products li",
-            ".order-items li",
-        ]
-        for sel in candidate_selectors:
-            els = page.query_selector_all(sel)
-            if els:
-                items = [el.inner_text().strip() for el in els if el.inner_text().strip()]
-                if items:
-                    print(f"[{datetime.now():%H:%M:%S}] Abel&Cole: {len(items)} items via '{sel}'", flush=True)
-                    break
+    if "Incapsula" in r.text:
+        raise RuntimeError(
+            "Still blocked by Incapsula — cookies may have expired. "
+            "Re-export them from your real browser and update abel_cookies.json."
+        )
+    if r.status_code != 200:
+        raise RuntimeError(f"Abel&Cole returned HTTP {r.status_code}")
 
-        browser.close()
+    print(f"[{datetime.now():%H:%M:%S}] Abel&Cole: page loaded ({len(r.text)} chars), parsing…", flush=True)
+    # Log HTML snippet to help tune selectors on first run
+    print(f"[{datetime.now():%H:%M:%S}] Abel&Cole HTML preview:\n{r.text[:3000]}", flush=True)
 
-    if not items:
-        raise RuntimeError("Abel&Cole scrape returned no items — check selectors in server.py logs")
-    return items
+    soup = BeautifulSoup(r.text, "html.parser")
+    candidate_selectors = [
+        ".delivery-item__name",
+        ".product-name",
+        ".item-name",
+        ".basket-item__name",
+        ".order-item__name",
+        ".product-title",
+        "[data-product-name]",
+        ".delivery-products li",
+        ".order-items li",
+    ]
+    for sel in candidate_selectors:
+        els = soup.select(sel)
+        items = [el.get_text(strip=True) for el in els if el.get_text(strip=True)]
+        if items:
+            print(f"[{datetime.now():%H:%M:%S}] Abel&Cole: {len(items)} items via '{sel}'", flush=True)
+            return items
+
+    raise RuntimeError(
+        "Scrape found no items — selectors need tuning. "
+        "Check the HTML preview above and update candidate_selectors in scrape_abel_cole()."
+    )
 
 
 def generate_meals(vegetables: list) -> list:
