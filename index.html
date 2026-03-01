@@ -3,259 +3,597 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Greenwich Station</title>
+  <title>Fradin Dashboard</title>
   <style>
+    :root {
+      --bg:          #0d1117;
+      --surface:     #161b22;
+      --surface2:    #1c2128;
+      --border:      #30363d;
+      --text:        #e6edf3;
+      --muted:       #8b949e;
+      --dim:         #3d444d;
+      --dlr:         #2196f3;
+      --rail:        #ff7043;
+      --eliot:       #ab47bc;
+      --solal:       #26c6da;
+      --green:       #4caf50;
+      --red:         #ef5350;
+      --yellow:      #ffa726;
+      --cyan:        #00e5ff;
+    }
+
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
-      font-family: sans-serif;
-      background: #1a1a2e;
-      color: #eee;
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
       min-height: 100vh;
+      padding: 20px 20px 12px;
+    }
+
+    /* ── HEADER ─────────────────────────────────── */
+    .header {
       display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: 20px;
+      justify-content: space-between;
+      align-items: flex-end;
+      max-width: 980px;
+      margin: 0 auto 16px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
     }
 
-    h1 {
-      font-size: 1.4rem;
-      color: #aaa;
-      margin-top: 20px;
+    .header-left .location {
+      font-size: 0.7rem;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: var(--muted);
       margin-bottom: 4px;
-      letter-spacing: 1px;
+    }
+
+    .clock {
+      font-size: 3.8rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -1px;
+      line-height: 1;
+      color: var(--text);
+    }
+
+    .header-right {
+      text-align: right;
+    }
+
+    .date-day {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .date-full {
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    /* ── TAB BAR ─────────────────────────────────── */
+    .tab-bar {
+      display: flex;
+      max-width: 980px;
+      margin: 0 auto;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 20px;
+    }
+
+    .tab-btn {
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+      color: var(--muted);
+      font-family: inherit;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 2.5px;
       text-transform: uppercase;
+      padding: 8px 18px;
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
     }
 
-    #clock {
-      font-size: 3rem;
-      font-weight: bold;
-      color: #fff;
-      margin-bottom: 28px;
+    .tab-btn:hover { color: var(--text); }
+
+    .tab-btn[data-tab="tab-trains"].active { border-bottom-color: var(--dlr);   color: var(--dlr);   }
+    .tab-btn[data-tab="tab-eliot"].active  { border-bottom-color: var(--eliot); color: var(--eliot); }
+    .tab-btn[data-tab="tab-solal"].active  { border-bottom-color: var(--solal); color: var(--solal); }
+
+    .tab-content        { display: none; }
+    .tab-content.active { display: block; }
+
+    /* ── GRID ────────────────────────────────────── */
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      max-width: 980px;
+      margin: 0 auto;
     }
 
-    .section {
-      width: 100%;
-      max-width: 480px;
-      margin-bottom: 24px;
+    /* ── SECTION CARD ────────────────────────────── */
+    .card {
+      background: var(--surface);
+      border-radius: 14px;
+      padding: 16px 18px;
     }
 
-    .section-title {
-      font-size: 0.75rem;
-      font-weight: bold;
-      letter-spacing: 2px;
+    .card-header {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      margin-bottom: 14px;
+    }
+
+    .card-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .card-title {
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 2.5px;
       text-transform: uppercase;
-      color: #888;
-      margin-bottom: 10px;
-      padding-left: 4px;
+      color: var(--muted);
     }
 
-    .train-card {
-      background: #16213e;
-      border-radius: 8px;
-      padding: 14px 18px;
-      margin-bottom: 10px;
+    .card-subtitle {
+      font-size: 0.68rem;
+      color: var(--dim);
+      margin-left: auto;
+    }
+
+    /* ── TRAIN ROWS ──────────────────────────────── */
+    .train-row {
       display: flex;
       justify-content: space-between;
       align-items: center;
+      background: var(--surface2);
+      border-radius: 10px;
+      padding: 12px 14px;
+      margin-bottom: 8px;
+      border-left: 4px solid transparent;
     }
 
-    .dlr-card   { border-left: 5px solid #00a0e3; }
-    .rail-card  { border-left: 5px solid #e8642c; }
+    .train-row.dlr-row  { border-left-color: var(--dlr); }
+    .train-row.rail-row { border-left-color: var(--rail); }
+    .train-row.urgent   { background: #1a1010; }
+    .train-row.urgent .train-mins { color: var(--red); }
 
-    .card-left { display: flex; flex-direction: column; gap: 4px; }
-
-    .destination {
-      font-size: 1.05rem;
-      font-weight: bold;
+    .train-dest {
+      font-size: 0.98rem;
+      font-weight: 600;
+      margin-bottom: 3px;
     }
 
-    .operator {
-      font-size: 0.78rem;
-      color: #888;
+    .train-op {
+      font-size: 0.72rem;
+      color: var(--muted);
     }
 
-    .on-time  { color: #4caf50; }
-    .late     { color: #ff6b6b; }
-    .no-report { color: #888; }
-
-    .minutes {
+    .train-mins {
       font-size: 2rem;
-      font-weight: bold;
-      color: #00e5ff;
+      font-weight: 700;
+      color: var(--cyan);
       text-align: right;
-      min-width: 60px;
+      line-height: 1;
+      min-width: 52px;
     }
 
-    .minutes span {
-      font-size: 0.8rem;
-      color: #aaa;
+    .train-mins small {
+      font-size: 0.62rem;
+      color: var(--muted);
       display: block;
     }
 
-    .due { color: #ff6b6b; }
+    .due { color: var(--red) !important; }
+    .on-time { color: var(--green); }
+    .late    { color: var(--red); }
 
-    .urgent {
-      border-left-color: #ff6b6b !important;
-      background: #2a1010;
+    /* ── LESSON ROWS ─────────────────────────────── */
+    .lesson-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 9px 10px;
+      border-radius: 8px;
+      margin-bottom: 5px;
+      border-left: 3px solid transparent;
     }
 
-    .urgent .minutes { color: #ff6b6b; }
-
-    #status {
-      font-size: 0.78rem;
-      color: #555;
-      margin-bottom: 30px;
+    .lesson-time {
+      font-size: 0.72rem;
+      font-variant-numeric: tabular-nums;
+      color: var(--muted);
+      line-height: 1.5;
+      min-width: 38px;
     }
 
-    .empty-msg { color: #555; font-size: 0.9rem; padding-left: 4px; }
-    .error-msg { color: #ff6b6b; font-size: 0.9rem; padding-left: 4px; }
+    .lesson-subject {
+      font-size: 0.9rem;
+      font-weight: 600;
+      flex: 1;
+    }
 
-    #build {
+    .lesson-badge {
+      font-size: 0.58rem;
+      font-weight: 700;
+      letter-spacing: 1px;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    /* States */
+    .is-past .lesson-subject,
+    .is-past .lesson-time {
+      color: var(--dim);
+    }
+
+    .is-current {
+      background: var(--surface2);
+      border-left-color: var(--green);
+    }
+    .is-current .lesson-time    { color: var(--green); }
+    .is-current .lesson-subject { color: var(--text); }
+
+    .is-cancelled .lesson-subject {
+      color: var(--red);
+      text-decoration: line-through;
+      text-decoration-color: var(--red);
+    }
+    .is-cancelled .lesson-time { color: var(--dim); }
+    .is-cancelled .lesson-badge {
+      background: rgba(239,83,80,.15);
+      color: var(--red);
+    }
+
+    /* ── HOMEWORK ─────────────────────────────────── */
+    .hw-day {
       font-size: 0.65rem;
-      color: #333;
-      margin-top: auto;
-      padding-top: 20px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin: 12px 0 6px;
+      padding-bottom: 4px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .hw-day:first-child { margin-top: 0; }
+
+    .hw-item {
+      padding: 5px 0;
+    }
+
+    .hw-subject {
+      font-size: 0.85rem;
+      font-weight: 600;
+      display: block;
+    }
+
+    .hw-desc {
+      font-size: 0.78rem;
+      color: var(--muted);
+      display: block;
+      margin-top: 2px;
+    }
+
+    /* ── FOOTER ──────────────────────────────────── */
+    .footer {
+      max-width: 980px;
+      margin: 14px auto 0;
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.62rem;
+      color: var(--dim);
+    }
+
+    /* ── STATES ──────────────────────────────────── */
+    .msg {
+      font-size: 0.85rem;
+      padding: 6px 2px;
+    }
+    .msg-empty { color: var(--muted); }
+    .msg-error { color: var(--red); }
+
+    /* ── RESPONSIVE ──────────────────────────────── */
+    @media (max-width: 640px) {
+      .grid { grid-template-columns: 1fr; }
+      .clock { font-size: 2.8rem; }
+      .header { flex-direction: column; align-items: flex-start; gap: 6px; }
+      .header-right { text-align: left; }
     }
   </style>
 </head>
 <body>
 
-  <h1>Greenwich Station</h1>
-  <div id="clock">--:--</div>
-
-  <div class="section">
-    <div class="section-title">DLR → Bank</div>
-    <div id="dlr-trains"><p class="empty-msg">Loading...</p></div>
+  <!-- HEADER -->
+  <div class="header">
+    <div class="header-left">
+      <div class="location">Greenwich · London</div>
+      <div class="clock" id="clock">--:--:--</div>
+    </div>
+    <div class="header-right">
+      <div class="date-day" id="date-day">--</div>
+      <div class="date-full" id="date-full">--</div>
+    </div>
   </div>
 
-  <div class="section">
-    <div class="section-title">National Rail → London</div>
-    <div id="rail-trains"><p class="empty-msg">Loading...</p></div>
+  <!-- TAB BAR -->
+  <nav class="tab-bar">
+    <button class="tab-btn active" data-tab="tab-trains">Trains</button>
+    <button class="tab-btn" data-tab="tab-eliot">Eliot</button>
+    <button class="tab-btn" data-tab="tab-solal">Solal</button>
+  </nav>
+
+  <!-- TAB: TRAINS -->
+  <div id="tab-trains" class="tab-content active">
+    <div class="grid">
+
+      <!-- DLR -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot" style="background:var(--dlr)"></div>
+          <div class="card-title">DLR → Bank</div>
+        </div>
+        <div id="dlr-trains"><p class="msg msg-empty">Loading…</p></div>
+      </div>
+
+      <!-- National Rail -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot" style="background:var(--rail)"></div>
+          <div class="card-title">National Rail → London</div>
+        </div>
+        <div id="rail-trains"><p class="msg msg-empty">Loading…</p></div>
+      </div>
+
+    </div>
   </div>
 
-  <div id="status"></div>
-  <div id="build">Built 2026-02-28 18:10</div>
+  <!-- TAB: ELIOT -->
+  <div id="tab-eliot" class="tab-content">
+    <div class="grid">
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot" style="background:var(--eliot)"></div>
+          <div class="card-title">Eliot · Emploi du temps</div>
+          <div class="card-subtitle" id="eliot-date"></div>
+        </div>
+        <div id="eliot-timetable"><p class="msg msg-empty">Loading…</p></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot" style="background:var(--eliot)"></div>
+          <div class="card-title">Eliot · Devoirs</div>
+        </div>
+        <div id="eliot-homework"><p class="msg msg-empty">Loading…</p></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- TAB: SOLAL -->
+  <div id="tab-solal" class="tab-content">
+    <div class="grid">
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot" style="background:var(--solal)"></div>
+          <div class="card-title">Solal · Emploi du temps</div>
+          <div class="card-subtitle" id="solal-date"></div>
+        </div>
+        <div id="solal-timetable"><p class="msg msg-empty">Loading…</p></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot" style="background:var(--solal)"></div>
+          <div class="card-title">Solal · Devoirs</div>
+        </div>
+        <div id="solal-homework"><p class="msg msg-empty">Loading…</p></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <div class="footer">
+    <span id="train-status">–</span>
+    <span id="school-status">–</span>
+    <span>Built 2026-03-01</span>
+  </div>
 
   <script>
-    // --- DLR via TfL API ---
-    const DLR_URL = "https://api.tfl.gov.uk/StopPoint/940GZZDLGRE/Arrivals";
-
-    // --- National Rail via TransportAPI ---
-    const RAIL_URL = "https://transportapi.com/v3/uk/train/station_timetables/GNW.json" +
-      "?app_id=04668624&app_key=fcf40276b02a30519083fda8e6fe6772&live=true&train_status=passenger&type=departure";
-
-    // Destinations that are towards/through London (northbound Thameslink)
-    const LONDON_BOUND = ["luton", "bedford", "st albans", "harpenden", "welwyn", "stevenage", "farringdon"];
-
-    function isTowardsLondon(train) {
-      const dest = (train.destination_name || "").toLowerCase();
-      if (dest.includes("london")) return true;
-      if (LONDON_BOUND.some(d => dest.includes(d))) return true;
-      return false;
-    }
+    // ── CLOCK ────────────────────────────────────────
+    const DAYS   = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    const MONTHS = ['January','February','March','April','May','June','July',
+                    'August','September','October','November','December'];
 
     function updateClock() {
       const now = new Date();
-      const h = String(now.getHours()).padStart(2, "0");
-      const m = String(now.getMinutes()).padStart(2, "0");
-      document.getElementById("clock").textContent = `${h}:${m}`;
+      const pad = n => String(n).padStart(2, '0');
+      document.getElementById('clock').textContent =
+        `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+      document.getElementById('date-day').textContent  = DAYS[now.getDay()];
+      document.getElementById('date-full').textContent =
+        `${now.getDate()} ${MONTHS[now.getMonth()]} ${now.getFullYear()}`;
     }
 
-    function urgentClass(mins) {
-      return mins <= 2 ? "urgent" : "";
+    // ── TABS ─────────────────────────────────────────
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn, .tab-content').forEach(e => e.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById(btn.dataset.tab).classList.add('active');
+      });
+    });
+
+    // ── TRAINS ───────────────────────────────────────
+    function minsHtml(mins) {
+      if (mins <= 1) return `<div class="train-mins due">Due<small>mins</small></div>`;
+      return `<div class="train-mins">${mins}<small>mins</small></div>`;
     }
 
-    function minsDisplay(mins) {
-      if (mins <= 1) return `<div class="minutes due">Due<span>mins</span></div>`;
-      return `<div class="minutes">${mins}<span>mins</span></div>`;
-    }
-
-    async function fetchDLR() {
-      const div = document.getElementById("dlr-trains");
+    async function fetchTrains() {
+      const dlrEl  = document.getElementById('dlr-trains');
+      const railEl = document.getElementById('rail-trains');
       try {
-        const res = await fetch(DLR_URL);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-
-        const trains = data
-          .filter(t => t.modeName === "dlr" && t.direction === "inbound")
-          .sort((a, b) => a.timeToStation - b.timeToStation)
-          .slice(0, 4);
-
-        if (trains.length === 0) {
-          div.innerHTML = `<p class="empty-msg">No DLR trains towards Bank right now.</p>`;
+        const r = await fetch('/api/trains');
+        if (!r.ok) {
+          const msg = ((await r.json()).error) || `HTTP ${r.status}`;
+          dlrEl.innerHTML  = `<p class="msg msg-error">DLR unavailable (${msg})</p>`;
+          railEl.innerHTML = `<p class="msg msg-error">Rail unavailable (${msg})</p>`;
           return;
         }
+        const data = await r.json();
 
-        div.innerHTML = trains.map(t => {
-          const mins = Math.floor(t.timeToStation / 60);
-          return `
-            <div class="train-card dlr-card ${urgentClass(mins)}">
-              <div class="card-left">
-                <div class="destination">${t.destinationName || "Unknown"}</div>
-                <div class="operator">DLR</div>
+        // DLR
+        if (!data.dlr.length) {
+          dlrEl.innerHTML = `<p class="msg msg-empty">No DLR trains right now.</p>`;
+        } else {
+          dlrEl.innerHTML = data.dlr.map(t => {
+            const mins = t.mins;
+            return `<div class="train-row dlr-row${mins <= 2 ? ' urgent' : ''}">
+              <div>
+                <div class="train-dest">${t.destination}</div>
+                <div class="train-op">DLR</div>
               </div>
-              ${minsDisplay(mins)}
+              ${minsHtml(mins)}
             </div>`;
-        }).join("");
+          }).join('');
+        }
 
-      } catch (err) {
-        div.innerHTML = `<p class="error-msg">DLR data unavailable (${err.message})</p>`;
+        // Rail
+        if (!data.rail.length) {
+          railEl.innerHTML = `<p class="msg msg-empty">No London trains right now.</p>`;
+        } else {
+          railEl.innerHTML = data.rail.map(t => {
+            const mins = t.mins;
+            const statusHtml = t.status === 'ON TIME'
+              ? `<span class="on-time">On time</span>`
+              : t.status === 'LATE'
+                ? `<span class="late">Late</span>`
+                : `<span style="color:var(--muted)">${t.status || ''}</span>`;
+            return `<div class="train-row rail-row${mins <= 2 ? ' urgent' : ''}">
+              <div>
+                <div class="train-dest">${t.destination}</div>
+                <div class="train-op">${t.operator} · ${statusHtml}</div>
+              </div>
+              ${minsHtml(mins)}
+            </div>`;
+          }).join('');
+        }
+
+        document.getElementById('train-status').textContent =
+          `Trains mis à jour ${data.cached_at || new Date().toLocaleTimeString()}`;
+      } catch(e) {
+        dlrEl.innerHTML  = `<p class="msg msg-error">DLR unavailable (${e.message})</p>`;
+        railEl.innerHTML = `<p class="msg msg-error">Rail unavailable (${e.message})</p>`;
       }
     }
 
-    async function fetchRail() {
-      const div = document.getElementById("rail-trains");
-      try {
-        const res = await fetch(RAIL_URL);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
+    // ── TIMETABLE & HOMEWORK ──────────────────────────
+    let _lastTimetable = null;
 
-        const trains = (data.departures?.all || [])
-          .filter(t => isTowardsLondon(t) && t.best_departure_estimate_mins != null)
-          .sort((a, b) => a.best_departure_estimate_mins - b.best_departure_estimate_mins)
-          .slice(0, 4);
+    function renderHomework(homework, elId) {
+      const el = document.getElementById(elId);
+      if (!el) return;
+      const dates = Object.keys(homework || {});
+      if (!dates.length) {
+        el.innerHTML = `<p class="msg msg-empty">Pas de devoirs cette semaine.</p>`;
+        return;
+      }
+      el.innerHTML = dates.map(label => {
+        return `<div class="hw-day">${label}</div>` +
+          (homework[label] || []).map(hw =>
+            `<div class="hw-item">
+              <span class="hw-subject">${hw.subject}</span>
+              <span class="hw-desc">${hw.description}</span>
+            </div>`
+          ).join('');
+      }).join('');
+    }
 
-        if (trains.length === 0) {
-          div.innerHTML = `<p class="empty-msg">No London-bound trains right now.</p>`;
-          return;
+    function renderTimetable(data) {
+      _lastTimetable = data;
+      const now     = new Date();
+      const nowMins = now.getHours() * 60 + now.getMinutes();
+      const label   = data.is_today ? 'Today' : `${data.weekday} ${data.date_label}`;
+      const ttIds   = ['eliot-timetable', 'solal-timetable'];
+      const hwIds   = ['eliot-homework',  'solal-homework'];
+      const dateIds = ['eliot-date',      'solal-date'];
+
+      data.children.forEach((child, i) => {
+        const dateEl = document.getElementById(dateIds[i]);
+        if (dateEl) dateEl.textContent = label;
+
+        const ttEl = document.getElementById(ttIds[i]);
+        if (ttEl) {
+          if (!child.lessons.length) {
+            ttEl.innerHTML = `<p class="msg msg-empty">No lessons ${data.date_label}</p>`;
+          } else {
+            ttEl.innerHTML = child.lessons.map(l => {
+              let cls = '', badge = '';
+              if (l.cancelled) {
+                cls   = 'is-cancelled';
+                badge = `<span class="lesson-badge">Annulé</span>`;
+              } else if (data.is_today) {
+                if (nowMins >= l.end_mins)        cls = 'is-past';
+                else if (nowMins >= l.start_mins) cls = 'is-current';
+              }
+              return `<div class="lesson-row ${cls}">
+                <div class="lesson-time">${l.start}<br>${l.end}</div>
+                <div class="lesson-subject">${l.subject}</div>
+                ${badge}
+              </div>`;
+            }).join('');
+          }
         }
 
-        div.innerHTML = trains.map(t => {
-          const mins = t.best_departure_estimate_mins;
-          const status = t.status === "ON TIME"
-            ? `<span class="on-time">On time</span>`
-            : t.status === "LATE"
-              ? `<span class="late">Late</span>`
-              : `<span class="no-report">${t.status || ""}</span>`;
-          return `
-            <div class="train-card rail-card ${urgentClass(mins)}">
-              <div class="card-left">
-                <div class="destination">${t.destination_name || "Unknown"}</div>
-                <div class="operator">${t.operator_name || ""} · ${status}</div>
-              </div>
-              ${minsDisplay(mins)}
-            </div>`;
-        }).join("");
+        renderHomework(child.homework, hwIds[i]);
+      });
 
-      } catch (err) {
-        div.innerHTML = `<p class="error-msg">Rail data unavailable (${err.message})</p>`;
+      document.getElementById('school-status').textContent =
+        `School updated ${data.cached_at || '–'}`;
+    }
+
+    async function fetchTimetable() {
+      try {
+        const r = await fetch('/api/timetable');
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        renderTimetable(await r.json());
+      } catch(e) {
+        ['eliot-timetable','solal-timetable'].forEach(id => {
+          document.getElementById(id).innerHTML =
+            `<p class="msg msg-error">Unavailable (${e.message})</p>`;
+        });
       }
     }
 
-    async function fetchAll() {
-      await Promise.all([fetchDLR(), fetchRail()]);
-      const now = new Date();
-      document.getElementById("status").textContent = `Updated at ${now.toLocaleTimeString()}`;
-    }
-
-    // Init
+    // ── INIT ─────────────────────────────────────────
     updateClock();
     setInterval(updateClock, 1000);
 
-    fetchAll();
-    setInterval(fetchAll, 30000);
+    fetchTrains();
+    setInterval(fetchTrains, 30000);
+
+    fetchTimetable();
+    setInterval(fetchTimetable, 600000);
+    setInterval(() => { if (_lastTimetable) renderTimetable(_lastTimetable); }, 60000);
   </script>
 
 </body>

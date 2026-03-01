@@ -1,0 +1,248 @@
+#!/usr/bin/env python3
+"""Local API server: serves timetable from Pronote + transport data + the dashboard HTML."""
+import os
+import time
+import threading
+from datetime import date, datetime, timedelta
+
+import requests
+from flask import Flask, jsonify, send_from_directory
+from dotenv import load_dotenv
+import pronotepy
+
+load_dotenv()
+
+app = Flask(__name__)
+
+PRONOTE_URL  = os.environ["PRONOTE_URL"]
+PRONOTE_USER = os.environ["PRONOTE_USER"]
+PRONOTE_PASS = os.environ["PRONOTE_PASS"]
+
+DLR_URL  = "https://api.tfl.gov.uk/StopPoint/940GZZDLGRE/Arrivals"
+RAIL_URL = (
+    "https://transportapi.com/v3/uk/train/station_timetables/GNW.json"
+    "?app_id=04668624&app_key=fcf40276b02a30519083fda8e6fe6772"
+    "&live=true&train_status=passenger&type=departure"
+)
+LONDON_BOUND = ["luton", "bedford", "st albans", "harpenden", "welwyn", "stevenage", "farringdon"]
+
+_cache           = {"data": None, "updated_at": None, "error": None}
+_transport_cache = {"data": None, "updated_at": None, "error": None}
+_lock            = threading.Lock()
+
+STATIC_DIR = os.path.dirname(os.path.abspath(__file__))
+
+DAYS_FR   = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
+MONTHS_FR = ["Jan", "Fév", "Mar", "Avr", "Mai", "Jun", "Jul", "Aoû", "Sep", "Oct", "Nov", "Déc"]
+
+
+def target_date():
+    """Return today, or next Monday on weekends."""
+    today = date.today()
+    if today.weekday() == 5:   # Saturday
+        return today + timedelta(days=2)
+    if today.weekday() == 6:   # Sunday
+        return today + timedelta(days=1)
+    return today
+
+
+def format_date_fr(d):
+    return f"{DAYS_FR[d.weekday()]} {d.day} {MONTHS_FR[d.month - 1]}"
+
+
+def _is_london_bound(t):
+    d = (t.get("destination_name") or "").lower()
+    return "london" in d or any(x in d for x in LONDON_BOUND)
+
+
+def _is_night():
+    total_mins = datetime.now().hour * 60 + datetime.now().minute
+    return total_mins >= 22 * 60 or total_mins < 7 * 60 + 15
+
+
+def _secs_until_715():
+    """Seconds until next 07:15."""
+    now    = datetime.now()
+    target = now.replace(hour=7, minute=15, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    return (target - now).total_seconds()
+
+
+# ── TRANSPORT ──────────────────────────────────────────────────────────────────
+
+def fetch_trains():
+    """Fetch DLR and National Rail, return {"dlr": [...], "rail": [...]}."""
+    # DLR
+    dlr_trains = []
+    try:
+        r = requests.get(DLR_URL, timeout=10)
+        r.raise_for_status()
+        arrivals = [t for t in r.json()
+                    if t.get("modeName") == "dlr" and t.get("direction") == "inbound"]
+        arrivals.sort(key=lambda t: t["timeToStation"])
+        for t in arrivals[:4]:
+            dlr_trains.append({
+                "destination": t.get("destinationName", "Unknown"),
+                "mins":        round(t["timeToStation"] / 60),
+            })
+    except Exception as exc:
+        print(f"[{datetime.now():%H:%M:%S}] DLR error: {exc}", flush=True)
+
+    # National Rail
+    rail_trains = []
+    try:
+        r = requests.get(RAIL_URL, timeout=10)
+        r.raise_for_status()
+        all_dep = (r.json().get("departures") or {}).get("all") or []
+        london_dep = [t for t in all_dep
+                      if t.get("best_departure_estimate_mins") is not None
+                      and _is_london_bound(t)]
+        london_dep.sort(key=lambda t: t["best_departure_estimate_mins"])
+        for t in london_dep[:4]:
+            rail_trains.append({
+                "destination": t.get("destination_name", "Unknown"),
+                "mins":        t["best_departure_estimate_mins"],
+                "status":      t.get("status", ""),
+                "operator":    t.get("operator_name", ""),
+            })
+    except Exception as exc:
+        print(f"[{datetime.now():%H:%M:%S}] Rail error: {exc}", flush=True)
+
+    return {"dlr": dlr_trains, "rail": rail_trains}
+
+
+def train_refresh_delay():
+    total_mins = datetime.now().hour * 60 + datetime.now().minute
+    if total_mins >= 22 * 60 or total_mins < 7 * 60 + 15:
+        return _secs_until_715()
+    if total_mins < 9 * 60:
+        return 600    # 10 min peak
+    return 3600       # 60 min off-peak
+
+
+def transport_refresh_loop():
+    while True:
+        if not _is_night():
+            try:
+                print(f"[{datetime.now():%H:%M:%S}] Fetching transport...", flush=True)
+                data = fetch_trains()
+                with _lock:
+                    _transport_cache["data"]       = data
+                    _transport_cache["updated_at"] = datetime.now().strftime("%H:%M")
+                    _transport_cache["error"]      = None
+                print(f"[{datetime.now():%H:%M:%S}] Transport cached OK.", flush=True)
+            except Exception as exc:
+                print(f"[{datetime.now():%H:%M:%S}] Transport ERROR: {exc}", flush=True)
+                with _lock:
+                    _transport_cache["error"] = str(exc)
+        else:
+            secs = _secs_until_715()
+            print(f"[{datetime.now():%H:%M:%S}] Transport: night mode, sleeping {secs/3600:.1f}h", flush=True)
+        time.sleep(train_refresh_delay())
+
+
+# ── PRONOTE ────────────────────────────────────────────────────────────────────
+
+def fetch_pronote():
+    d      = target_date()
+    today  = date.today()
+    hw_end = today + timedelta(days=7)
+
+    client = pronotepy.ParentClient(PRONOTE_URL, PRONOTE_USER, PRONOTE_PASS)
+
+    children = []
+    for child in client.children:
+        client.set_child(child)
+        lessons = sorted(client.lessons(d), key=lambda l: l.start)
+
+        hw_by_date = {}
+        try:
+            for hw in client.homework(today, hw_end):
+                if hw.done:
+                    continue
+                hw_date = hw.date.date() if hasattr(hw.date, "date") else hw.date
+                label   = format_date_fr(hw_date)
+                hw_by_date.setdefault(label, []).append({
+                    "subject":     hw.subject.name if hw.subject else "?",
+                    "description": hw.description or "",
+                })
+        except Exception as exc:
+            print(f"[{datetime.now():%H:%M:%S}] Homework error ({child.name}): {exc}", flush=True)
+
+        children.append({
+            "name": child.name.split()[-1].capitalize(),
+            "lessons": [
+                {
+                    "start":      l.start.strftime("%H:%M"),
+                    "end":        l.end.strftime("%H:%M"),
+                    "start_mins": l.start.hour * 60 + l.start.minute,
+                    "end_mins":   l.end.hour * 60 + l.end.minute,
+                    "subject":    l.subject.name if l.subject else "?",
+                    "cancelled":  bool(l.canceled),
+                    "status":     l.status or "",
+                }
+                for l in lessons
+            ],
+            "homework": hw_by_date,
+        })
+
+    return {
+        "date_label": d.strftime("%-d %B"),
+        "weekday":    d.strftime("%A"),
+        "is_today":   d == date.today(),
+        "children":   children,
+    }
+
+
+def pronote_refresh_loop():
+    while True:
+        if not _is_night():
+            try:
+                print(f"[{datetime.now():%H:%M:%S}] Fetching Pronote...", flush=True)
+                data = fetch_pronote()
+                with _lock:
+                    _cache["data"]       = data
+                    _cache["updated_at"] = datetime.now().strftime("%H:%M")
+                    _cache["error"]      = None
+                print(f"[{datetime.now():%H:%M:%S}] Pronote cached OK.", flush=True)
+            except Exception as exc:
+                print(f"[{datetime.now():%H:%M:%S}] Pronote ERROR: {exc}", flush=True)
+                with _lock:
+                    _cache["error"] = str(exc)
+            time.sleep(3600)
+        else:
+            secs = _secs_until_715()
+            print(f"[{datetime.now():%H:%M:%S}] Pronote: night mode, sleeping {secs/3600:.1f}h", flush=True)
+            time.sleep(secs)
+
+
+# ── ROUTES ─────────────────────────────────────────────────────────────────────
+
+@app.route("/api/trains")
+def api_trains():
+    with _lock:
+        if _transport_cache["data"] is None:
+            msg = _transport_cache["error"] or "Loading…"
+            return jsonify({"error": msg}), 503
+        return jsonify({**_transport_cache["data"], "cached_at": _transport_cache["updated_at"]})
+
+
+@app.route("/api/timetable")
+def api_timetable():
+    with _lock:
+        if _cache["data"] is None:
+            msg = _cache["error"] or "Loading…"
+            return jsonify({"error": msg}), 503
+        return jsonify({**_cache["data"], "cached_at": _cache["updated_at"]})
+
+
+@app.route("/")
+def index():
+    return send_from_directory(STATIC_DIR, "index.html")
+
+
+if __name__ == "__main__":
+    threading.Thread(target=pronote_refresh_loop, daemon=True).start()
+    threading.Thread(target=transport_refresh_loop, daemon=True).start()
+    app.run(host="0.0.0.0", port=5000, debug=False)
