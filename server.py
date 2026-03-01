@@ -66,6 +66,10 @@ def format_date_fr(d):
 
 
 def _is_london_bound(t):
+    # Exclude trains that originated from London — they're on the outbound leg
+    origin = (t.get("origin_name") or "").lower()
+    if "london" in origin:
+        return False
     d = (t.get("destination_name") or "").lower()
     return "london" in d or any(x in d for x in LONDON_BOUND)
 
