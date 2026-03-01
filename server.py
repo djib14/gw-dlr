@@ -244,18 +244,17 @@ def pronote_refresh_loop():
 # ── DINNERS ────────────────────────────────────────────────────────────────────
 
 def scrape_abel_cole() -> list:
-    """Fetch Abel & Cole next delivery contents using cookies from a real browser session.
+    """Fetch Abel & Cole next delivery box contents.
 
-    Abel & Cole is protected by Incapsula WAF which blocks all headless/automated
-    browsers regardless of stealth settings.  The workaround: export cookies from
-    your real browser after logging in, save them to abel_cookies.json (or the path
-    set in ABEL_COOKIES_FILE env var).  Those cookies include the Incapsula
-    'visid_incap_*' proof-of-humanity token that lets requests through.
+    Uses cookies exported from a real browser to bypass Incapsula WAF.
+    Two-step approach:
+      1. POST to the delivery API to get the subscribed product ID.
+      2. Fetch that product's page and parse .box-item .current-item elements.
 
-    How to export cookies (one-time setup, refresh ~yearly):
+    Cookie setup (one-time, refresh ~yearly):
       1. Log into https://www.abelandcole.co.uk in Chrome or Firefox.
       2. Install the "Cookie Editor" browser extension.
-      3. Navigate to https://www.abelandcole.co.uk/my-account/deliveries
+      3. Navigate to https://www.abelandcole.co.uk/deliveries
       4. Open Cookie Editor → Export → Export as JSON.
       5. Save the result to abel_cookies.json next to server.py.
     """
@@ -271,55 +270,68 @@ def scrape_abel_cole() -> list:
     with open(ABEL_COOKIES_FILE) as f:
         raw_cookies = json.load(f)
 
-    # Cookie Editor exports a list of dicts; convert to name→value dict
     cookies = {c["name"]: c["value"] for c in raw_cookies if "name" in c and "value" in c}
-
-    print(f"[{datetime.now():%H:%M:%S}] Abel&Cole: fetching with {len(cookies)} cookies…", flush=True)
+    print(f"[{datetime.now():%H:%M:%S}] Abel&Cole: scraping with {len(cookies)} cookies…", flush=True)
 
     session = cffi_requests.Session()
-    r = session.get(
-        "https://www.abelandcole.co.uk/my-account/deliveries",
+    base_headers = {"Accept-Language": "en-GB,en;q=0.9", "Referer": "https://www.abelandcole.co.uk/deliveries"}
+
+    # Step 1: get the product ID of the next delivery box via the delivery API
+    r = session.post(
+        "https://www.abelandcole.co.uk/ProductSelectionServices/GetProductSelectionView",
         cookies=cookies,
         impersonate="chrome120",
-        headers={"Accept-Language": "en-GB,en;q=0.9"},
-        timeout=30,
+        headers={**base_headers, "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                 "X-Requested-With": "XMLHttpRequest"},
+        data={"objTypeId": 3},
+        timeout=20,
     )
-
-    if "Incapsula" in r.text:
+    if r.status_code != 200 or "application/json" not in r.headers.get("content-type", ""):
         raise RuntimeError(
-            "Still blocked by Incapsula — cookies may have expired. "
-            "Re-export them from your real browser and update abel_cookies.json."
+            f"Delivery API error (HTTP {r.status_code}) — cookies may have expired. "
+            "Re-export them from your real browser."
         )
-    if r.status_code != 200:
-        raise RuntimeError(f"Abel&Cole returned HTTP {r.status_code}")
 
-    print(f"[{datetime.now():%H:%M:%S}] Abel&Cole: page loaded ({len(r.text)} chars), parsing…", flush=True)
-    # Log HTML snippet to help tune selectors on first run
-    print(f"[{datetime.now():%H:%M:%S}] Abel&Cole HTML preview:\n{r.text[:3000]}", flush=True)
+    deliveries = r.json()["ProductSelectionView"]["Deliveries"]
+    if not deliveries or not deliveries[0]["Products"]:
+        raise RuntimeError("No upcoming delivery found in Abel & Cole account.")
 
-    soup = BeautifulSoup(r.text, "html.parser")
-    candidate_selectors = [
-        ".delivery-item__name",
-        ".product-name",
-        ".item-name",
-        ".basket-item__name",
-        ".order-item__name",
-        ".product-title",
-        "[data-product-name]",
-        ".delivery-products li",
-        ".order-items li",
-    ]
-    for sel in candidate_selectors:
-        els = soup.select(sel)
-        items = [el.get_text(strip=True) for el in els if el.get_text(strip=True)]
-        if items:
-            print(f"[{datetime.now():%H:%M:%S}] Abel&Cole: {len(items)} items via '{sel}'", flush=True)
-            return items
+    product_id = deliveries[0]["Products"][0]["ProductId"]
+    delivery_date = deliveries[0]["DateTimeDeliveryDate"]
+    print(f"[{datetime.now():%H:%M:%S}] Abel&Cole: next delivery {delivery_date}, product ID {product_id}", flush=True)
 
-    raise RuntimeError(
-        "Scrape found no items — selectors need tuning. "
-        "Check the HTML preview above and update candidate_selectors in scrape_abel_cole()."
+    # Step 2: fetch the product page (redirects to the slug URL)
+    r2 = session.get(
+        f"https://www.abelandcole.co.uk/shop/product/{product_id}",
+        cookies=cookies,
+        impersonate="chrome120",
+        headers=base_headers,
+        timeout=20,
+        allow_redirects=True,
     )
+    if r2.status_code != 200:
+        raise RuntimeError(f"Product page returned HTTP {r2.status_code} for product {product_id}")
+
+    print(f"[{datetime.now():%H:%M:%S}] Abel&Cole: product page {r2.url}", flush=True)
+
+    # Step 3: parse box item names (deduplicated, preserving order)
+    soup = BeautifulSoup(r2.text, "html.parser")
+    seen = set()
+    items = []
+    for el in soup.select(".box-item .current-item"):
+        name = el.get_text(strip=True)
+        if name and name not in seen:
+            seen.add(name)
+            items.append(name)
+
+    if not items:
+        raise RuntimeError(
+            "Parsed 0 box items from product page — selector may have changed. "
+            f"Check {r2.url}"
+        )
+
+    print(f"[{datetime.now():%H:%M:%S}] Abel&Cole: {len(items)} items: {items}", flush=True)
+    return items
 
 
 def generate_meals(vegetables: list) -> list:
