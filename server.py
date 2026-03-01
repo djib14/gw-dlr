@@ -26,13 +26,18 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 ABEL_COOKIES_FILE = os.environ.get("ABEL_COOKIES_FILE",
                                    os.path.join(os.path.dirname(os.path.abspath(__file__)), "abel_cookies.json"))
 
-DLR_URL  = "https://api.tfl.gov.uk/StopPoint/940GZZDLGRE/Arrivals"
 RAIL_URL = (
     "https://transportapi.com/v3/uk/train/station_timetables/GNW.json"
     "?app_id=04668624&app_key=fcf40276b02a30519083fda8e6fe6772"
     "&live=true&train_status=passenger&type=departure"
 )
-LONDON_BOUND = ["luton", "bedford", "st albans", "harpenden", "welwyn", "stevenage", "farringdon"]
+LONDON_BOUND = [
+    # Thameslink north of London (pass through Blackfriars/Farringdon/St Pancras)
+    "luton", "bedford", "st albans", "harpenden", "welwyn", "stevenage",
+    "farringdon", "kentish town", "st pancras", "elstree", "borehamwood",
+    # Catch-all for any other cross-London Thameslink terminus
+    "city thameslink", "blackfriars",
+]
 
 _cache           = {"data": None, "updated_at": None, "error": None}
 _transport_cache = {"data": None, "updated_at": None, "error": None}
@@ -82,24 +87,7 @@ def _secs_until_715():
 # ── TRANSPORT ──────────────────────────────────────────────────────────────────
 
 def fetch_trains():
-    """Fetch DLR and National Rail, return {"dlr": [...], "rail": [...]}."""
-    # DLR
-    dlr_trains = []
-    try:
-        r = requests.get(DLR_URL, timeout=10)
-        r.raise_for_status()
-        arrivals = [t for t in r.json()
-                    if t.get("modeName") == "dlr" and t.get("direction") == "inbound"]
-        arrivals.sort(key=lambda t: t["timeToStation"])
-        for t in arrivals[:4]:
-            dep_time = datetime.now() + timedelta(seconds=t["timeToStation"])
-            dlr_trains.append({
-                "destination": t.get("destinationName", "Unknown"),
-                "time":        dep_time.strftime("%H:%M"),
-            })
-    except Exception as exc:
-        print(f"[{datetime.now():%H:%M:%S}] DLR error: {exc}", flush=True)
-
+    """Fetch National Rail departures, return {"rail": [...]}."""
     # National Rail
     rail_trains = []
     try:
@@ -120,7 +108,7 @@ def fetch_trains():
     except Exception as exc:
         print(f"[{datetime.now():%H:%M:%S}] Rail error: {exc}", flush=True)
 
-    return {"dlr": dlr_trains, "rail": rail_trains}
+    return {"rail": rail_trains}
 
 
 def train_refresh_delay():
@@ -346,18 +334,25 @@ def generate_meals(vegetables: list) -> list:
         f"dans ma box Abel & Cole :\n{veg_list}\n\n"
         "Propose 4 dîners variés pour lundi, mardi, mercredi et jeudi. "
         "Chaque légume/produit ne doit être utilisé que dans UN SEUL dîner maximum.\n\n"
+        "Pour chaque dîner, fournis aussi une recette simple avec 4 à 6 ingrédients et 3 à 5 étapes de préparation.\n\n"
         "Réponds UNIQUEMENT avec un JSON valide, sans aucun autre texte, dans ce format exact :\n"
         '[\n'
-        '  {"day": "Lundi",    "name": "Nom du plat", "description": "Description courte en français", "uses": ["Légume1"]},\n'
-        '  {"day": "Mardi",    "name": "Nom du plat", "description": "Description courte en français", "uses": ["Légume2"]},\n'
-        '  {"day": "Mercredi", "name": "Nom du plat", "description": "Description courte en français", "uses": ["Légume3"]},\n'
-        '  {"day": "Jeudi",    "name": "Nom du plat", "description": "Description courte en français", "uses": ["Légume4"]}\n'
+        '  {\n'
+        '    "day": "Lundi",\n'
+        '    "name": "Nom du plat",\n'
+        '    "description": "Description courte en français",\n'
+        '    "uses": ["Légume1"],\n'
+        '    "recipe": {\n'
+        '      "ingredients": ["200g de Légume1", "2 gousses d\'ail", "..."],\n'
+        '      "steps": ["Éplucher et couper...", "Faire revenir...", "..."]\n'
+        '    }\n'
+        '  }\n'
         ']'
     )
 
     message = client.messages.create(
         model="claude-haiku-4-5-20251001",
-        max_tokens=1024,
+        max_tokens=3000,
         messages=[{"role": "user", "content": prompt}],
     )
     content = message.content[0].text.strip()

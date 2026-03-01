@@ -191,7 +191,7 @@
       color: var(--cyan);
       text-align: right;
       line-height: 1.2;
-      min-width: 64px;
+      min-width: 80px;
       white-space: nowrap;
     }
 
@@ -346,6 +346,70 @@
     .meal-desc { font-size: 0.78rem; color: var(--muted); }
     .meal-uses { font-size: 0.68rem; color: var(--dim); margin-top: 4px; }
 
+    details.recipe-details { margin-top: 10px; }
+
+    details.recipe-details summary {
+      cursor: pointer;
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--dinners);
+      list-style: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      user-select: none;
+    }
+    details.recipe-details summary::-webkit-details-marker { display: none; }
+    details.recipe-details summary::after { content: '▾'; transition: transform 0.2s; }
+    details[open].recipe-details summary::after { transform: rotate(-180deg); }
+
+    .recipe-panel {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
+    }
+
+    .recipe-section-label {
+      font-size: 0.62rem;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin: 10px 0 5px;
+    }
+    .recipe-section-label:first-child { margin-top: 0; }
+
+    .recipe-ingredients { padding-left: 16px; margin: 0; }
+    .recipe-ingredients li { font-size: 0.8rem; color: var(--text); margin-bottom: 3px; }
+
+    .recipe-steps { list-style: none; padding: 0; margin: 0; counter-reset: step; }
+    .recipe-steps li {
+      font-size: 0.8rem;
+      color: var(--text);
+      margin-bottom: 5px;
+      padding-left: 20px;
+      position: relative;
+    }
+    .recipe-steps li::before {
+      counter-increment: step;
+      content: counter(step);
+      position: absolute;
+      left: 0;
+      font-size: 0.65rem;
+      font-weight: 700;
+      color: var(--dinners);
+      background: rgba(255,138,101,.15);
+      border-radius: 50%;
+      width: 14px;
+      height: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      top: 2px;
+    }
+
     .veg-item {
       display: inline-block;
       background: var(--surface2);
@@ -401,7 +465,7 @@
     <button class="tab-btn active" data-tab="tab-trains">Trains</button>
     <button class="tab-btn" data-tab="tab-child1">Enfant 1</button>
     <button class="tab-btn" data-tab="tab-child2">Enfant 2</button>
-    <button class="tab-btn" data-tab="tab-dinners">Diners</button>
+    <button class="tab-btn" data-tab="tab-dinners">Dinners</button>
   </nav>
 
   <!-- TAB: TRAINS -->
@@ -412,7 +476,7 @@
       <div class="card">
         <div class="card-header">
           <div class="card-dot" style="background:var(--dlr)"></div>
-          <div class="card-title">DLR → Bank</div>
+          <div class="card-title">DLR → London</div>
         </div>
         <div id="dlr-trains"><p class="msg msg-empty">Loading…</p></div>
       </div>
@@ -531,6 +595,18 @@
     });
 
     // ── TRAINS ───────────────────────────────────────
+    const DLR_TFL_URL = 'https://api.tfl.gov.uk/StopPoint/940GZZDLGRE/Arrivals';
+
+    let _dlrUpdatedAt  = null;
+    let _railUpdatedAt = null;
+
+    function updateTrainStatus() {
+      const parts = [];
+      if (_dlrUpdatedAt)  parts.push(`DLR ${_dlrUpdatedAt}`);
+      if (_railUpdatedAt) parts.push(`Rail ${_railUpdatedAt}`);
+      document.getElementById('train-status').textContent = parts.join(' · ') || '–';
+    }
+
     function minsFromTime(hhmm) {
       if (!hhmm) return null;
       const now = new Date();
@@ -551,38 +627,59 @@
       return `<div class="train-mins"><span class="train-time">${time || '–'}</span>${countdown}</div>`;
     }
 
-    async function fetchTrains() {
-      const dlrEl  = document.getElementById('dlr-trains');
+    async function fetchDLR() {
+      const dlrEl = document.getElementById('dlr-trains');
+      try {
+        const r = await fetch(DLR_TFL_URL);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const arrivals = (await r.json())
+          .filter(t => t.modeName === 'dlr' && t.direction === 'inbound')
+          .sort((a, b) => a.timeToStation - b.timeToStation)
+          .slice(0, 4);
+        if (!arrivals.length) {
+          dlrEl.innerHTML = `<p class="msg msg-empty">No DLR trains right now.</p>`;
+        } else {
+          const now = new Date();
+          const pad = n => String(n).padStart(2, '0');
+          dlrEl.innerHTML = arrivals.map(t => {
+            const secs    = t.timeToStation;
+            const mins    = Math.round(secs / 60);
+            const dep     = new Date(now.getTime() + secs * 1000);
+            const timeStr = `${pad(dep.getHours())}:${pad(dep.getMinutes())}:${pad(dep.getSeconds())}`;
+            const dest    = (t.destinationName || '').replace(/\bBank DLR Station\b/i, 'Bank');
+            const countdownHtml = mins <= 1
+              ? `<span class="train-countdown">Due</span>`
+              : `<span class="train-countdown">${mins}m</span>`;
+            return `<div class="train-row dlr-row${mins <= 2 ? ' urgent' : ''}">
+              <div>
+                <div class="train-dest">${dest}</div>
+                <div class="train-op">DLR</div>
+              </div>
+              <div class="train-mins">
+                <span class="train-time">${timeStr}</span>
+                ${countdownHtml}
+              </div>
+            </div>`;
+          }).join('');
+        }
+        _dlrUpdatedAt = new Date().toLocaleTimeString('fr-FR', {hour: '2-digit', minute: '2-digit'});
+        updateTrainStatus();
+      } catch(e) {
+        dlrEl.innerHTML = `<p class="msg msg-error">DLR unavailable (${e.message})</p>`;
+      }
+    }
+
+    async function fetchRail() {
       const railEl = document.getElementById('rail-trains');
       try {
         const r = await fetch('/api/trains');
         if (!r.ok) {
           const msg = ((await r.json()).error) || `HTTP ${r.status}`;
-          dlrEl.innerHTML  = `<p class="msg msg-error">DLR unavailable (${msg})</p>`;
           railEl.innerHTML = `<p class="msg msg-error">Rail unavailable (${msg})</p>`;
           return;
         }
         const data = await r.json();
-
-        // DLR
-        const dlrRows = data.dlr
-          .filter(t => { const m = minsFromTime(t.time); return m === null || m >= 0; })
-          .map(t => {
-            const mins = minsFromTime(t.time);
-            return `<div class="train-row dlr-row${mins !== null && mins <= 2 ? ' urgent' : ''}">
-              <div>
-                <div class="train-dest">${t.destination}</div>
-                <div class="train-op">DLR</div>
-              </div>
-              ${trainTimeHtml(t.time)}
-            </div>`;
-          });
-        dlrEl.innerHTML = dlrRows.length
-          ? dlrRows.join('')
-          : `<p class="msg msg-empty">No DLR trains right now.</p>`;
-
-        // Rail
-        const railRows = data.rail
+        const railRows = (data.rail || [])
           .filter(t => { const m = minsFromTime(t.time); return m === null || m >= 0; })
           .map(t => {
             const mins = minsFromTime(t.time);
@@ -602,11 +699,9 @@
         railEl.innerHTML = railRows.length
           ? railRows.join('')
           : `<p class="msg msg-empty">No London trains right now.</p>`;
-
-        document.getElementById('train-status').textContent =
-          `Trains mis à jour ${data.cached_at || new Date().toLocaleTimeString()}`;
+        _railUpdatedAt = data.cached_at || new Date().toLocaleTimeString('fr-FR', {hour: '2-digit', minute: '2-digit'});
+        updateTrainStatus();
       } catch(e) {
-        dlrEl.innerHTML  = `<p class="msg msg-error">DLR unavailable (${e.message})</p>`;
         railEl.innerHTML = `<p class="msg msg-error">Rail unavailable (${e.message})</p>`;
       }
     }
@@ -725,14 +820,28 @@
         if (!data.meals || !data.meals.length) {
           mealsEl.innerHTML = `<p class="msg msg-empty">Pas de menus disponibles.</p>`;
         } else {
-          mealsEl.innerHTML = data.meals.map(m =>
-            `<div class="meal-card">
+          mealsEl.innerHTML = data.meals.map(m => {
+            let recipeHtml = '';
+            if (m.recipe) {
+              const ings = (m.recipe.ingredients || []).map(i => `<li>${i}</li>`).join('');
+              const steps = (m.recipe.steps || []).map(s => `<li>${s}</li>`).join('');
+              recipeHtml = `
+              <details class="recipe-details">
+                <summary>Recette</summary>
+                <div class="recipe-panel">
+                  ${ings ? `<div class="recipe-section-label">Ingrédients</div><ul class="recipe-ingredients">${ings}</ul>` : ''}
+                  ${steps ? `<div class="recipe-section-label">Préparation</div><ol class="recipe-steps">${steps}</ol>` : ''}
+                </div>
+              </details>`;
+            }
+            return `<div class="meal-card">
               <div class="meal-day">${m.day}</div>
               <div class="meal-name">${m.name}</div>
               <div class="meal-desc">${m.description}</div>
               ${m.uses && m.uses.length ? `<div class="meal-uses">🥦 ${m.uses.join(', ')}</div>` : ''}
-            </div>`
-          ).join('');
+              ${recipeHtml}
+            </div>`;
+          }).join('');
         }
 
         // Box contents
@@ -753,8 +862,11 @@
     updateClock();
     setInterval(updateClock, 1000);
 
-    fetchTrains();
-    setInterval(fetchTrains, 30000);
+    fetchDLR();
+    setInterval(fetchDLR, 30000);
+
+    fetchRail();
+    setInterval(fetchRail, 30000);
 
     fetchTimetable();
     setInterval(fetchTimetable, 600000);
