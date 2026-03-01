@@ -13,6 +13,7 @@ import pronotepy
 load_dotenv()
 
 app = Flask(__name__)
+app.json.sort_keys = False
 
 PRONOTE_URL  = os.environ["PRONOTE_URL"]
 PRONOTE_USER = os.environ["PRONOTE_USER"]
@@ -158,15 +159,16 @@ def fetch_pronote():
 
         hw_by_date = {}
         try:
+            hw_raw = {}
             for hw in client.homework(today, hw_end):
                 if hw.done:
                     continue
                 hw_date = hw.date.date() if hasattr(hw.date, "date") else hw.date
-                label   = format_date_fr(hw_date)
-                hw_by_date.setdefault(label, []).append({
+                hw_raw.setdefault(hw_date, []).append({
                     "subject":     hw.subject.name if hw.subject else "?",
                     "description": hw.description or "",
                 })
+            hw_by_date = {format_date_fr(d): items for d, items in sorted(hw_raw.items())}
         except Exception as exc:
             print(f"[{datetime.now():%H:%M:%S}] Homework error ({child.name}): {exc}", flush=True)
 
