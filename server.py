@@ -23,6 +23,8 @@ PRONOTE_PASS = os.environ["PRONOTE_PASS"]
 ABEL_EMAIL        = os.environ.get("ABEL_EMAIL", "")
 ABEL_PASS         = os.environ.get("ABEL_PASS", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+HA_URL            = os.environ.get("HA_URL", "").rstrip("/")
+HA_TOKEN          = os.environ.get("HA_TOKEN", "")
 ABEL_COOKIES_FILE = os.environ.get("ABEL_COOKIES_FILE",
                                    os.path.join(os.path.dirname(os.path.abspath(__file__)), "abel_cookies.json"))
 
@@ -479,6 +481,104 @@ def dinners_refresh_loop():
         time.sleep(3600)  # check every hour
 
 
+# ── HOME ASSISTANT ─────────────────────────────────────────────────────────────
+
+def _next_school_day() -> date:
+    """Return the next weekday after today (skips weekends)."""
+    candidate = date.today() + timedelta(days=1)
+    while candidate.weekday() >= 5:
+        candidate += timedelta(days=1)
+    return candidate
+
+
+def push_wake_times_to_ha() -> dict:
+    """Compute each child's first lesson tomorrow and push to HA input_datetime entities.
+
+    HA entity naming convention: input_datetime.lever_<firstname_lowercase>
+    e.g. input_datetime.lever_emma
+
+    Returns a dict mapping child name → result string (for the API endpoint).
+    """
+    results = {}
+
+    if not HA_URL or not HA_TOKEN:
+        print(f"[{datetime.now():%H:%M:%S}] HA push: HA_URL or HA_TOKEN not configured", flush=True)
+        return {"error": "HA_URL or HA_TOKEN not configured"}
+
+    with _lock:
+        data = _cache["data"]
+
+    if not data:
+        print(f"[{datetime.now():%H:%M:%S}] HA push: no Pronote data in cache yet", flush=True)
+        return {"error": "No Pronote data in cache"}
+
+    target = _next_school_day()
+    target_label = target.strftime("%-d %B")  # matches "date_label" in the Pronote data
+
+    headers = {
+        "Authorization": f"Bearer {HA_TOKEN}",
+        "Content-Type": "application/json",
+    }
+
+    for child in data["children"]:
+        name = child["name"]
+        entity_id = f"input_datetime.lever_{name.lower()}"
+
+        day_data = next((d for d in child["days"] if d["date_label"] == target_label), None)
+        if day_data is None or not day_data["lessons"]:
+            msg = f"no school on {target}"
+            print(f"[{datetime.now():%H:%M:%S}] HA push: {name} — {msg}", flush=True)
+            results[name] = msg
+            continue
+
+        first_lesson = next((l for l in day_data["lessons"] if not l["cancelled"]), None)
+        if first_lesson is None:
+            msg = f"all lessons cancelled on {target}"
+            print(f"[{datetime.now():%H:%M:%S}] HA push: {name} — {msg}", flush=True)
+            results[name] = msg
+            continue
+
+        first_lesson_dt = datetime.combine(target, datetime.strptime(first_lesson["start"], "%H:%M").time())
+        wake_dt = first_lesson_dt - timedelta(minutes=90)
+        dt_str = wake_dt.strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            r = requests.post(
+                f"{HA_URL}/api/services/input_datetime/set_datetime",
+                headers=headers,
+                json={"entity_id": entity_id, "datetime": dt_str},
+                timeout=10,
+            )
+            r.raise_for_status()
+            msg = f"set to {dt_str}"
+            print(f"[{datetime.now():%H:%M:%S}] HA push: {entity_id} → {dt_str}", flush=True)
+        except Exception as exc:
+            msg = f"error: {exc}"
+            print(f"[{datetime.now():%H:%M:%S}] HA push ERROR ({entity_id}): {exc}", flush=True)
+
+        results[name] = msg
+
+    return results
+
+
+def _secs_until_21h() -> float:
+    """Seconds until next 21:00."""
+    now    = datetime.now()
+    target = now.replace(hour=21, minute=0, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    return (target - now).total_seconds()
+
+
+def ha_push_loop():
+    """Every evening at 21:00, push tomorrow's first lesson times to HA."""
+    while True:
+        secs = _secs_until_21h()
+        print(f"[{datetime.now():%H:%M:%S}] HA push: sleeping {secs/3600:.1f}h until 21:00", flush=True)
+        time.sleep(secs)
+        print(f"[{datetime.now():%H:%M:%S}] HA push: running scheduled push…", flush=True)
+        push_wake_times_to_ha()
+
+
 # ── ROUTES ─────────────────────────────────────────────────────────────────────
 
 @app.route("/api/trains")
@@ -508,6 +608,13 @@ def api_dinners():
         return jsonify({**_dinners_cache["data"], "cached_at": _dinners_cache["updated_at"]})
 
 
+@app.route("/api/ha/push", methods=["POST"])
+def api_ha_push():
+    """Manually trigger the HA wake-time push (useful for testing)."""
+    results = push_wake_times_to_ha()
+    return jsonify(results)
+
+
 @app.route("/")
 def index():
     return send_from_directory(STATIC_DIR, "index.html")
@@ -518,4 +625,5 @@ if __name__ == "__main__":
     threading.Thread(target=pronote_refresh_loop, daemon=True).start()
     threading.Thread(target=transport_refresh_loop, daemon=True).start()
     threading.Thread(target=dinners_refresh_loop, daemon=True).start()
+    threading.Thread(target=ha_push_loop, daemon=True).start()
     app.run(host="0.0.0.0", port=5000, debug=False)
