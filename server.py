@@ -44,6 +44,56 @@ _transport_cache = {"data": None, "updated_at": None, "error": None}
 _dinners_cache   = {"data": None, "updated_at": None, "error": None, "week": None}
 _lock            = threading.Lock()
 
+# Persistent cache: train_uid → "inbound" | "outbound"
+# Survives restarts; entries older than 8 days are pruned.
+_SVC_DIR_FILE  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "service_direction_cache.json")
+_svc_dir_cache: dict = {}
+
+
+def _load_svc_dir_cache():
+    global _svc_dir_cache
+    try:
+        if os.path.exists(_SVC_DIR_FILE):
+            with open(_SVC_DIR_FILE) as f:
+                raw = json.load(f)
+            cutoff = str(date.today() - timedelta(days=8))
+            _svc_dir_cache = {k: v for k, v in raw.items() if k.split(":")[-1] >= cutoff}
+    except Exception as exc:
+        print(f"[svc-cache] load error: {exc}", flush=True)
+
+
+def _save_svc_dir_cache():
+    try:
+        with open(_SVC_DIR_FILE, "w") as f:
+            json.dump(_svc_dir_cache, f)
+    except Exception as exc:
+        print(f"[svc-cache] save error: {exc}", flush=True)
+
+
+def _svc_direction(train_uid, timetable_url):
+    """Return 'inbound' if London Cannon Street appears after Greenwich in the calling pattern."""
+    cache_key = f"{train_uid}:{date.today()}"
+    if cache_key in _svc_dir_cache:
+        return _svc_dir_cache[cache_key]
+    direction = "outbound"  # safe default: exclude if uncertain
+    try:
+        r = requests.get(timetable_url, timeout=10)
+        r.raise_for_status()
+        stops = [s.get("station_name", "").lower() for s in r.json().get("stops", [])]
+        gnw = next((i for i, s in enumerate(stops) if s == "greenwich"), None)
+        if gnw is not None:
+            prev_stop = stops[gnw - 1] if gnw > 0 else ""
+            # Inbound: came from Maze Hill (Woolwich direction → London)
+            # Outbound: came from Deptford (London direction → Bexleyheath)
+            if "maze hill" in prev_stop:
+                direction = "inbound"
+        print(f"[{datetime.now():%H:%M:%S}] {train_uid}: {direction} (prev={stops[gnw-1] if gnw is not None and gnw > 0 else '?'})", flush=True)
+    except Exception as exc:
+        print(f"[{datetime.now():%H:%M:%S}] svc timetable {train_uid}: {exc}", flush=True)
+    _svc_dir_cache[cache_key] = direction
+    _save_svc_dir_cache()
+    return direction
+
 STATIC_DIR = os.path.dirname(os.path.abspath(__file__))
 
 DAYS_FR   = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
@@ -66,12 +116,21 @@ def format_date_fr(d):
 
 
 def _is_london_bound(t):
-    # Exclude trains that originated from London — they're on the outbound leg
     origin = (t.get("origin_name") or "").lower()
+    dest   = (t.get("destination_name") or "").lower()
+    # Circular service (e.g. Cannon St → Bexleyheath → Cannon St):
+    # origin == destination, both in London. Fetch the service timetable
+    # to check whether London Cannon Street is before or after Greenwich.
+    if "london" in origin and "london" in dest:
+        url = (t.get("service_timetable") or {}).get("id")
+        uid = t.get("train_uid", "")
+        if url and uid:
+            return _svc_direction(uid, url) == "inbound"
+        return False
+    # Non-circular outbound: originated from London, heading away
     if "london" in origin:
         return False
-    d = (t.get("destination_name") or "").lower()
-    return "london" in d or any(x in d for x in LONDON_BOUND)
+    return "london" in dest or any(x in dest for x in LONDON_BOUND)
 
 
 def _is_night():
@@ -455,6 +514,7 @@ def index():
 
 
 if __name__ == "__main__":
+    _load_svc_dir_cache()
     threading.Thread(target=pronote_refresh_loop, daemon=True).start()
     threading.Thread(target=transport_refresh_loop, daemon=True).start()
     threading.Thread(target=dinners_refresh_loop, daemon=True).start()
