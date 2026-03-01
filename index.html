@@ -615,8 +615,21 @@
       const nowMins = now.getHours() * 60 + now.getMinutes();
       const ttIds   = ['child1-timetable', 'child2-timetable'];
       const hwIds   = ['child1-homework',  'child2-homework'];
+      const tabKeys = ['child1', 'child2'];
 
       data.children.forEach((child, i) => {
+        // Update tab label and card titles with the name loaded from Pronote
+        const key  = tabKeys[i];
+        const name = child.name;
+        const btn  = document.querySelector(`[data-tab="tab-${key}"]`);
+        if (btn) btn.textContent = name;
+        const tab  = document.getElementById(`tab-${key}`);
+        if (tab) {
+          const titles = tab.querySelectorAll('.card-title');
+          if (titles[0]) titles[0].textContent = `${name} · Emploi du temps`;
+          if (titles[1]) titles[1].textContent = `${name} · Devoirs`;
+        }
+
         const ttEl = document.getElementById(ttIds[i]);
         if (ttEl) {
           const daysWithLessons = (child.days || []).filter(d => d.lessons.length > 0);
