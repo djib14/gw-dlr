@@ -259,6 +259,27 @@
       color: var(--red);
     }
 
+    /* ── DAY HEADER (timetable) ──────────────────── */
+    .day-header {
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin: 14px 0 6px;
+      padding-bottom: 4px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .day-header:first-child { margin-top: 0; }
+    .day-header.is-today { color: var(--green); border-bottom-color: var(--green); }
+
+    .lesson-meta {
+      font-size: 0.68rem;
+      color: var(--muted);
+      margin-top: 1px;
+    }
+
     /* ── HOMEWORK ─────────────────────────────────── */
     .hw-day {
       font-size: 0.8rem;
@@ -370,7 +391,6 @@
         <div class="card-header">
           <div class="card-dot" style="background:var(--eliot)"></div>
           <div class="card-title">Eliot · Emploi du temps</div>
-          <div class="card-subtitle" id="eliot-date"></div>
         </div>
         <div id="eliot-timetable"><p class="msg msg-empty">Loading…</p></div>
       </div>
@@ -394,7 +414,6 @@
         <div class="card-header">
           <div class="card-dot" style="background:var(--solal)"></div>
           <div class="card-title">Solal · Emploi du temps</div>
-          <div class="card-subtitle" id="solal-date"></div>
         </div>
         <div id="solal-timetable"><p class="msg msg-empty">Loading…</p></div>
       </div>
@@ -532,34 +551,39 @@
       _lastTimetable = data;
       const now     = new Date();
       const nowMins = now.getHours() * 60 + now.getMinutes();
-      const label   = data.is_today ? 'Today' : `${data.weekday} ${data.date_label}`;
       const ttIds   = ['eliot-timetable', 'solal-timetable'];
       const hwIds   = ['eliot-homework',  'solal-homework'];
-      const dateIds = ['eliot-date',      'solal-date'];
 
       data.children.forEach((child, i) => {
-        const dateEl = document.getElementById(dateIds[i]);
-        if (dateEl) dateEl.textContent = label;
-
         const ttEl = document.getElementById(ttIds[i]);
         if (ttEl) {
-          if (!child.lessons.length) {
-            ttEl.innerHTML = `<p class="msg msg-empty">No lessons ${data.date_label}</p>`;
+          const daysWithLessons = (child.days || []).filter(d => d.lessons.length > 0);
+          if (!daysWithLessons.length) {
+            ttEl.innerHTML = `<p class="msg msg-empty">Pas de cours cette semaine.</p>`;
           } else {
-            ttEl.innerHTML = child.lessons.map(l => {
-              let cls = '', badge = '';
-              if (l.cancelled) {
-                cls   = 'is-cancelled';
-                badge = `<span class="lesson-badge">Annulé</span>`;
-              } else if (data.is_today) {
-                if (nowMins >= l.end_mins)        cls = 'is-past';
-                else if (nowMins >= l.start_mins) cls = 'is-current';
-              }
-              return `<div class="lesson-row ${cls}">
-                <div class="lesson-time">${l.start}<br>${l.end}</div>
-                <div class="lesson-subject">${l.subject}</div>
-                ${badge}
-              </div>`;
+            ttEl.innerHTML = daysWithLessons.map(day => {
+              const headerCls = day.is_today ? 'day-header is-today' : 'day-header';
+              const dayLabel  = day.is_today ? `Aujourd'hui · ${day.date_fr}` : day.date_fr;
+              const lessonsHtml = day.lessons.map(l => {
+                let cls = '', badge = '';
+                if (l.cancelled) {
+                  cls   = 'is-cancelled';
+                  badge = `<span class="lesson-badge">Annulé</span>`;
+                } else if (day.is_today) {
+                  if (nowMins >= l.end_mins)        cls = 'is-past';
+                  else if (nowMins >= l.start_mins) cls = 'is-current';
+                }
+                const meta = [l.teacher, l.room].filter(Boolean).join(' · ');
+                return `<div class="lesson-row ${cls}">
+                  <div class="lesson-time">${l.start}<br>${l.end}</div>
+                  <div style="flex:1">
+                    <div class="lesson-subject">${l.subject}</div>
+                    ${meta ? `<div class="lesson-meta">${meta}</div>` : ''}
+                  </div>
+                  ${badge}
+                </div>`;
+              }).join('');
+              return `<div class="${headerCls}">${dayLabel}</div>${lessonsHtml}`;
             }).join('');
           }
         }

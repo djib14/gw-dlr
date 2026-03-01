@@ -37,14 +37,15 @@ DAYS_FR   = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Diman
 MONTHS_FR = ["Jan", "Fév", "Mar", "Avr", "Mai", "Jun", "Jul", "Aoû", "Sep", "Oct", "Nov", "Déc"]
 
 
-def target_date():
-    """Return today, or next Monday on weekends."""
-    today = date.today()
-    if today.weekday() == 5:   # Saturday
-        return today + timedelta(days=2)
-    if today.weekday() == 6:   # Sunday
-        return today + timedelta(days=1)
-    return today
+def target_dates():
+    """Return remaining weekdays this week, or next Mon–Fri on weekends."""
+    today   = date.today()
+    weekday = today.weekday()
+    if weekday >= 5:  # weekend → next Mon–Fri
+        start = today + timedelta(days=(7 - weekday))
+        return [start + timedelta(days=i) for i in range(5)]
+    # weekday: from today through Friday
+    return [today + timedelta(days=i) for i in range(5 - weekday)]
 
 
 def format_date_fr(d):
@@ -146,7 +147,7 @@ def transport_refresh_loop():
 # ── PRONOTE ────────────────────────────────────────────────────────────────────
 
 def fetch_pronote():
-    d      = target_date()
+    dates  = target_dates()
     today  = date.today()
     hw_end = today + timedelta(days=7)
 
@@ -155,7 +156,36 @@ def fetch_pronote():
     children = []
     for child in client.children:
         client.set_child(child)
-        lessons = sorted(client.lessons(d), key=lambda l: l.start)
+
+        # Fetch the full week range and group by date
+        all_lessons = sorted(client.lessons(dates[0], dates[-1]), key=lambda l: l.start)
+        lessons_by_date = {}
+        for l in all_lessons:
+            lessons_by_date.setdefault(l.start.date(), []).append(l)
+
+        days = []
+        for d in dates:
+            day_lessons = lessons_by_date.get(d, [])
+            days.append({
+                "date_label": d.strftime("%-d %B"),
+                "date_fr":    format_date_fr(d),
+                "weekday":    d.strftime("%A"),
+                "is_today":   d == today,
+                "lessons": [
+                    {
+                        "start":      l.start.strftime("%H:%M"),
+                        "end":        l.end.strftime("%H:%M"),
+                        "start_mins": l.start.hour * 60 + l.start.minute,
+                        "end_mins":   l.end.hour * 60 + l.end.minute,
+                        "subject":    l.subject.name if l.subject else "?",
+                        "cancelled":  bool(l.canceled),
+                        "status":     l.status or "",
+                        "teacher":    l.teacher_name or "",
+                        "room":       l.classroom or "",
+                    }
+                    for l in day_lessons
+                ],
+            })
 
         hw_by_date = {}
         try:
@@ -173,28 +203,12 @@ def fetch_pronote():
             print(f"[{datetime.now():%H:%M:%S}] Homework error ({child.name}): {exc}", flush=True)
 
         children.append({
-            "name": child.name.split()[-1].capitalize(),
-            "lessons": [
-                {
-                    "start":      l.start.strftime("%H:%M"),
-                    "end":        l.end.strftime("%H:%M"),
-                    "start_mins": l.start.hour * 60 + l.start.minute,
-                    "end_mins":   l.end.hour * 60 + l.end.minute,
-                    "subject":    l.subject.name if l.subject else "?",
-                    "cancelled":  bool(l.canceled),
-                    "status":     l.status or "",
-                }
-                for l in lessons
-            ],
+            "name":     child.name.split()[-1].capitalize(),
+            "days":     days,
             "homework": hw_by_date,
         })
 
-    return {
-        "date_label": d.strftime("%-d %B"),
-        "weekday":    d.strftime("%A"),
-        "is_today":   d == date.today(),
-        "children":   children,
-    }
+    return {"children": children}
 
 
 def pronote_refresh_loop():
