@@ -537,8 +537,9 @@
       const [h, m] = hhmm.split(':').map(Number);
       let dep = new Date(now);
       dep.setHours(h, m, 0, 0);
-      // handle midnight crossover
-      if (dep - now < -60000) dep.setDate(dep.getDate() + 1);
+      // handle midnight crossover (e.g. 23:58 → 00:05): only advance by a day
+      // if the time is genuinely far in the past (>12h), not just a departed train
+      if (dep - now < -12 * 60 * 60 * 1000) dep.setDate(dep.getDate() + 1);
       return Math.round((dep - now) / 60000);
     }
 
@@ -564,10 +565,9 @@
         const data = await r.json();
 
         // DLR
-        if (!data.dlr.length) {
-          dlrEl.innerHTML = `<p class="msg msg-empty">No DLR trains right now.</p>`;
-        } else {
-          dlrEl.innerHTML = data.dlr.map(t => {
+        const dlrRows = data.dlr
+          .filter(t => { const m = minsFromTime(t.time); return m === null || m >= 0; })
+          .map(t => {
             const mins = minsFromTime(t.time);
             return `<div class="train-row dlr-row${mins !== null && mins <= 2 ? ' urgent' : ''}">
               <div>
@@ -576,14 +576,15 @@
               </div>
               ${trainTimeHtml(t.time)}
             </div>`;
-          }).join('');
-        }
+          });
+        dlrEl.innerHTML = dlrRows.length
+          ? dlrRows.join('')
+          : `<p class="msg msg-empty">No DLR trains right now.</p>`;
 
         // Rail
-        if (!data.rail.length) {
-          railEl.innerHTML = `<p class="msg msg-empty">No London trains right now.</p>`;
-        } else {
-          railEl.innerHTML = data.rail.map(t => {
+        const railRows = data.rail
+          .filter(t => { const m = minsFromTime(t.time); return m === null || m >= 0; })
+          .map(t => {
             const mins = minsFromTime(t.time);
             const statusHtml = t.status === 'ON TIME'
               ? `<span class="on-time">On time</span>`
@@ -597,8 +598,10 @@
               </div>
               ${trainTimeHtml(t.time)}
             </div>`;
-          }).join('');
-        }
+          });
+        railEl.innerHTML = railRows.length
+          ? railRows.join('')
+          : `<p class="msg msg-empty">No London trains right now.</p>`;
 
         document.getElementById('train-status').textContent =
           `Trains mis à jour ${data.cached_at || new Date().toLocaleTimeString()}`;
