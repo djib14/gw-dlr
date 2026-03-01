@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Fradin Dashboard</title>
+  <title>Family Dashboard</title>
   <style>
     :root {
       --bg:          #0d1117;
@@ -15,8 +15,8 @@
       --dim:         #3d444d;
       --dlr:         #2196f3;
       --rail:        #ff7043;
-      --eliot:       #ab47bc;
-      --solal:       #26c6da;
+      --child1:      #ab47bc;
+      --child2:      #26c6da;
       --green:       #4caf50;
       --red:         #ef5350;
       --yellow:      #ffa726;
@@ -106,8 +106,8 @@
     .tab-btn:hover { color: var(--text); }
 
     .tab-btn[data-tab="tab-trains"].active   { border-bottom-color: var(--dlr);     color: var(--dlr);     }
-    .tab-btn[data-tab="tab-eliot"].active    { border-bottom-color: var(--eliot);   color: var(--eliot);   }
-    .tab-btn[data-tab="tab-solal"].active    { border-bottom-color: var(--solal);   color: var(--solal);   }
+    .tab-btn[data-tab="tab-child1"].active    { border-bottom-color: var(--child1);   color: var(--child1);   }
+    .tab-btn[data-tab="tab-child2"].active    { border-bottom-color: var(--child2);   color: var(--child2);   }
     .tab-btn[data-tab="tab-dinners"].active  { border-bottom-color: var(--dinners); color: var(--dinners); }
 
     .tab-content        { display: none; }
@@ -392,8 +392,8 @@
   <!-- TAB BAR -->
   <nav class="tab-bar">
     <button class="tab-btn active" data-tab="tab-trains">Trains</button>
-    <button class="tab-btn" data-tab="tab-eliot">Eliot</button>
-    <button class="tab-btn" data-tab="tab-solal">Solal</button>
+    <button class="tab-btn" data-tab="tab-child1">Enfant 1</button>
+    <button class="tab-btn" data-tab="tab-child2">Enfant 2</button>
     <button class="tab-btn" data-tab="tab-dinners">Diners</button>
   </nav>
 
@@ -422,47 +422,47 @@
     </div>
   </div>
 
-  <!-- TAB: ELIOT -->
-  <div id="tab-eliot" class="tab-content">
+  <!-- TAB: CHILD 1 -->
+  <div id="tab-child1" class="tab-content">
     <div class="grid">
 
       <div class="card">
         <div class="card-header">
-          <div class="card-dot" style="background:var(--eliot)"></div>
-          <div class="card-title">Eliot · Emploi du temps</div>
+          <div class="card-dot" style="background:var(--child1)"></div>
+          <div class="card-title">Enfant 1 · Emploi du temps</div>
         </div>
-        <div id="eliot-timetable"><p class="msg msg-empty">Loading…</p></div>
+        <div id="child1-timetable"><p class="msg msg-empty">Loading…</p></div>
       </div>
 
       <div class="card">
         <div class="card-header">
-          <div class="card-dot" style="background:var(--eliot)"></div>
-          <div class="card-title">Eliot · Devoirs</div>
+          <div class="card-dot" style="background:var(--child1)"></div>
+          <div class="card-title">Enfant 1 · Devoirs</div>
         </div>
-        <div id="eliot-homework"><p class="msg msg-empty">Loading…</p></div>
+        <div id="child1-homework"><p class="msg msg-empty">Loading…</p></div>
       </div>
 
     </div>
   </div>
 
-  <!-- TAB: SOLAL -->
-  <div id="tab-solal" class="tab-content">
+  <!-- TAB: CHILD 2 -->
+  <div id="tab-child2" class="tab-content">
     <div class="grid">
 
       <div class="card">
         <div class="card-header">
-          <div class="card-dot" style="background:var(--solal)"></div>
-          <div class="card-title">Solal · Emploi du temps</div>
+          <div class="card-dot" style="background:var(--child2)"></div>
+          <div class="card-title">Enfant 2 · Emploi du temps</div>
         </div>
-        <div id="solal-timetable"><p class="msg msg-empty">Loading…</p></div>
+        <div id="child2-timetable"><p class="msg msg-empty">Loading…</p></div>
       </div>
 
       <div class="card">
         <div class="card-header">
-          <div class="card-dot" style="background:var(--solal)"></div>
-          <div class="card-title">Solal · Devoirs</div>
+          <div class="card-dot" style="background:var(--child2)"></div>
+          <div class="card-title">Enfant 2 · Devoirs</div>
         </div>
-        <div id="solal-homework"><p class="msg msg-empty">Loading…</p></div>
+        <div id="child2-homework"><p class="msg msg-empty">Loading…</p></div>
       </div>
 
     </div>
@@ -613,8 +613,8 @@
       _lastTimetable = data;
       const now     = new Date();
       const nowMins = now.getHours() * 60 + now.getMinutes();
-      const ttIds   = ['eliot-timetable', 'solal-timetable'];
-      const hwIds   = ['eliot-homework',  'solal-homework'];
+      const ttIds   = ['child1-timetable', 'child2-timetable'];
+      const hwIds   = ['child1-homework',  'child2-homework'];
 
       data.children.forEach((child, i) => {
         const ttEl = document.getElementById(ttIds[i]);
@@ -663,7 +663,7 @@
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         renderTimetable(await r.json());
       } catch(e) {
-        ['eliot-timetable','solal-timetable'].forEach(id => {
+        ['child1-timetable','child2-timetable'].forEach(id => {
           document.getElementById(id).innerHTML =
             `<p class="msg msg-error">Unavailable (${e.message})</p>`;
         });
