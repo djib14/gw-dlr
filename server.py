@@ -396,11 +396,8 @@ def dinners_refresh_loop():
             with _lock:
                 cached_week = _dinners_cache["week"]
 
-            # Refresh on: Saturday (5), Sunday (6), or Monday before noon (0 + hour < 12)
-            is_refresh_window = (
-                weekday >= 5
-                or (weekday == 0 and datetime.now().hour < 12)
-            )
+            # Refresh once on Sunday (weekday == 6), before the Monday delivery
+            is_refresh_window = (weekday == 6)
             should_refresh = (cached_week != current_monday) and is_refresh_window
 
             if should_refresh:
